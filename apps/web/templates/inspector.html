@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentFlow Inspector</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1d212b; --border: #2a2f3a;
+    --text: #e6e9ef; --muted: #8b93a5; --accent: #4da3ff; --ok: #3ecf8e;
+    --bad: #ff6b6b; --warn: #f5c451;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 16px; align-items: baseline; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  main { display: grid; grid-template-columns: 280px 1fr; gap: 0; min-height: calc(100vh - 49px); }
+  aside { border-right: 1px solid var(--border); padding: 14px; background: var(--panel); }
+  aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; }
+  button { background: var(--accent); border: 0; color: #08131f; font-weight: 600; padding: 8px 12px; border-radius: 6px; cursor: pointer; width: 100%; }
+  button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+  button + button { margin-top: 6px; }
+  .sessions { margin-top: 14px; }
+  .session { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; cursor: pointer; background: var(--panel2); }
+  .session:hover { border-color: var(--accent); }
+  .session.active { border-color: var(--accent); }
+  .session .id { font-family: Consolas, monospace; font-size: 11px; color: var(--muted); }
+  .session .meta { font-size: 12px; }
+  .status-finished { color: var(--ok); } .status-failed { color: var(--bad); } .status-running { color: var(--warn); }
+  section.panels { padding: 14px 18px; overflow: auto; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
+  .panel h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  td.mono, .mono { font-family: Consolas, monospace; font-size: 12px; }
+  .bar { display: inline-block; height: 10px; border-radius: 5px; background: var(--accent); vertical-align: middle; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 9px; border: 1px solid var(--border); color: var(--muted); }
+  .tag.ok { color: var(--ok); border-color: var(--ok); } .tag.bad { color: var(--bad); border-color: var(--bad); }
+  pre { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; overflow: auto; max-height: 260px; font-size: 12px; }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); font-style: italic; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  details { margin: 4px 0; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; background: var(--panel2); }
+  summary { cursor: pointer; font-size: 13px; }
+  .notice { border: 1px dashed var(--warn); color: var(--warn); border-radius: 6px; padding: 8px 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AgentFlow Inspector</h1>
+  <span class="sub">the context debugger — why did the agent behave this way?</span>
+</header>
+<main>
+  <aside>
+    <h2>Offline runs</h2>
+    <button id="run-simple">Create offline run (simple)</button>
+    <button id="run-compaction" class="ghost">Create offline run (compaction)</button>
+    <div class="sessions">
+      <h2>Sessions</h2>
+      <div id="sessions" class="muted">loading…</div>
+    </div>
+  </aside>
+  <section class="panels">
+    <div class="panel">
+      <h3>Session</h3>
+      <div id="session-detail" class="empty">select or create a session</div>
+    </div>
+    <div class="panel">
+      <h3>Session Timeline</h3>
+      <div id="timeline" class="empty">no session selected</div>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h3>Prompt Sections</h3>
+        <div id="prompt" class="empty">no session selected</div>
+      </div>
+      <div class="panel">
+        <h3>Context Breakdown &amp; Snapshot History</h3>
+        <div id="context" class="empty">no session selected</div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h3>Tool Calls</h3>
+        <div id="tools" class="empty">no session selected</div>
+      </div>
+      <div class="panel">
+        <h3>Compaction (before / after)</h3>
+        <div id="compaction" class="empty">no session selected</div>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Replay (from the event log — no provider or tool is called)</h3>
+      <div id="replay" class="empty">no session selected</div>
+    </div>
+    <div class="panel">
+      <h3>Evaluation Summary</h3>
+      <div id="evaluation" class="empty">no session selected</div>
+    </div>
+  </section>
+</main>
+<script>
+"use strict";
+var currentSessionId = null;
+
+function el(id) { return document.getElementById(id); }
+function tag(text, cls) { return '<span class="tag ' + (cls || "") + '">' + text + "</span>"; }
+
+function fetchJson(url) {
+  return fetch(url).then(function (res) {
+    return res.json().then(function (body) { return { ok: res.ok, status: res.status, body: body }; });
+  });
+}
+
+function refreshSessions() {
+  fetchJson("/api/sessions").then(function (r) {
+    var box = el("sessions");
+    if (!r.body.length) { box.className = "muted"; box.textContent = "no sessions yet"; return; }
+    box.className = "";
+    box.innerHTML = r.body.map(function (s) {
+      return '<div class="session' + (s.session_id === currentSessionId ? " active" : "") + '" data-id="' + s.session_id + '">' +
+        '<div class="meta">' + (s.task || "(no task)") + " " + tag(s.status, "status-" + s.status) + "</div>" +
+        '<div class="id">' + s.session_id.slice(0, 8) + "… · " + s.event_count + " events</div></div>";
+    }).join("");
+    Array.prototype.forEach.call(box.querySelectorAll(".session"), function (node) {
+      node.addEventListener("click", function () { selectSession(node.getAttribute("data-id")); });
+    });
+  });
+}
+
+function createRun(scenario) {
+  fetch("/api/runs", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scenario: scenario })
+  }).then(function (res) { return res.json(); }).then(function (body) {
+    currentSessionId = body.session_id;
+    refreshSessions();
+    selectSession(body.session_id);
+  });
+}
+
+function renderDetail(detail) {
+  el("session-detail").className = "";
+  el("session-detail").innerHTML =
+    "<div>task: " + (detail.task || "(none)") + "</div>" +
+    '<div>status: ' + tag(detail.status, "status-" + detail.status) +
+    " · model: <span class='mono'>" + detail.model + "</span>" +
+    " · " + detail.event_count + " events" +
+    (detail.created_at ? " · started " + detail.created_at.replace("T", " ").slice(0, 19) : "") + "</div>";
+}
+
+function renderTimeline(data) {
+  var rows = data.entries.map(function (e) {
+    return "<tr><td class='mono'>" + e.sequence + "</td><td class='mono'>" + e.event_type +
+      "</td><td>" + (e.step === null ? "" : e.step) + "</td><td>" + (e.summary || "") + "</td></tr>";
+  }).join("");
+  el("timeline").className = "";
+  el("timeline").innerHTML = "<table><tr><th>seq</th><th>event</th><th>step</th><th>summary</th></tr>" + rows + "</table>";
+}
+
+function renderPrompt(snapshots) {
+  var box = el("prompt");
+  if (!snapshots.length) { box.className = "empty"; box.textContent = "no prompt snapshots"; return; }
+  var latest = snapshots[snapshots.length - 1];
+  var html = "<div class='muted mono'>" + latest.snapshot_id.slice(-14) +
+    " · estimator " + latest.estimator + " · total " + latest.total_tokens + " tokens</div>";
+  html += latest.sections.map(function (name) {
+    var tokens = latest.token_counts[name] || 0;
+    var pct = latest.total_tokens ? Math.round(100 * tokens / latest.total_tokens) : 0;
+    var content = (latest.section_content[name] || "").replace(/</g, "&lt;");
+    return "<details><summary>" + name + " — " + tokens + " tokens " +
+      "<span class='bar' style='width:" + Math.max(pct, 4) * 2 + "px'></span></summary>" +
+      "<pre>" + content + "</pre></details>";
+  }).join("");
+  box.className = "";
+  box.innerHTML = html;
+}
+
+function renderContext(snapshots) {
+  var box = el("context");
+  if (!snapshots.length) { box.className = "empty"; box.textContent = "no context snapshots"; return; }
+  var max = Math.max.apply(null, snapshots.map(function (s) { return s.total_tokens; })) || 1;
+  var html = snapshots.map(function (s) {
+    var parts = Object.keys(s.component_tokens).map(function (k) {
+      var pct = s.total_tokens ? Math.round(100 * s.component_tokens[k] / s.total_tokens) : 0;
+      return k + " " + s.component_tokens[k] + "t";
+    }).join(" · ");
+    var fits = s.total_tokens <= (s.budget_limit || 0);
+    return "<div style='margin:6px 0'><div class='mono'>" + s.snapshot_id.slice(-9) +
+      " · step " + s.metadata.step + " · " + s.total_tokens + "/" + (s.budget_limit || "?") +
+      "t " + tag(fits ? "fits" : "over", fits ? "ok" : "bad") +
+      (s.compaction_state !== "none" ? " " + tag("compacted: " + s.compaction_state) : "") + "</div>" +
+      "<div class='bar' style='width:" + Math.round(400 * s.total_tokens / max) + "px'></div>" +
+      "<div class='muted'>" + parts + "</div></div>";
+  }).join("");
+  box.className = "";
+  box.innerHTML = html;
+}
+
+function renderReplay(replay) {
+  var rows = replay.steps.map(function (s) {
+    var compaction = s.compaction
+      ? "<div class='muted'>compaction " + s.compaction.strategy + ": " +
+        s.compaction.before_tokens + "→" + s.compaction.after_tokens + " tokens, removed " +
+        s.compaction.removed_ids.length + "</div>" : "";
+    var tools = s.tool_calls.map(function (c) {
+      return "<div class='mono'>" + c.name + " → " + tag(c.ok ? "ok" : "fail", c.ok ? "ok" : "bad") +
+        " " + String(c.value === null ? "" : c.value).slice(0, 40) + "</div>";
+    }).join("");
+    return "<tr><td class='mono'>" + s.step + "</td><td>" +
+      (s.context_total_tokens === null ? "" : s.context_total_tokens + "t") +
+      "</td><td>" + (s.finish_reason || "") + "</td><td>" + (s.response_content || "") +
+      (tools ? tools : "") + compaction + "</td></tr>";
+  }).join("");
+  el("replay").className = "";
+  el("replay").innerHTML =
+    "<div class='muted'>status " + tag(replay.status, "status-" + replay.status) +
+    " · answer: " + (replay.final_answer || "—") + "</div>" +
+    "<table><tr><th>step</th><th>ctx</th><th>finish</th><th>response / tools</th></tr>" + rows + "</table>";
+
+  var toolRows = [];
+  replay.steps.forEach(function (s) {
+    s.tool_calls.forEach(function (c) {
+      toolRows.push("<tr><td class='mono'>step " + s.step + "</td><td class='mono'>" + c.name +
+        "</td><td>" + JSON.stringify(c.arguments) + "</td><td>" +
+        tag(c.ok ? "ok" : "fail", c.ok ? "ok" : "bad") + "</td><td class='mono'>" +
+        String(c.value === null ? "" : c.value).slice(0, 60) + (c.error || "") + "</td></tr>");
+    });
+  });
+  el("tools").className = toolRows.length ? "" : "empty";
+  el("tools").innerHTML = toolRows.length
+    ? "<table><tr><th>step</th><th>tool</th><th>arguments</th><th>result</th><th>value</th></tr>" + toolRows.join("") + "</table>"
+    : "no tool calls";
+
+  var comps = replay.compactions;
+  el("compaction").className = comps.length ? "" : "empty";
+  el("compaction").innerHTML = comps.length
+    ? comps.map(function (c) {
+        return "<div style='margin:8px 0'><div class='mono'>" + tag(c.strategy) +
+          " " + c.before_tokens + "→" + (c.after_tokens === null ? "?" : c.after_tokens) +
+          " tokens " + tag(c.fits_budget ? "fits" : "over", c.fits_budget ? "ok" : "bad") + "</div>" +
+          "<div class='muted'>trigger: " + c.trigger + "</div>" +
+          "<div class='muted'>removed " + c.removed_ids.length + " messages</div>" +
+          "<pre>" + JSON.stringify(c.preserved_state, null, 2).replace(/</g, "&lt;") + "</pre></div>";
+      }).join("")
+    : "no compaction in this session";
+}
+
+function renderEvaluation(r) {
+  var box = el("evaluation");
+  if (r.status !== 200) {
+    box.className = "";
+    box.innerHTML = "<div class='notice'>evaluation unavailable — " + (r.body.detail || r.status) + "</div>";
+    return;
+  }
+  var report = r.body;
+  var pct = Math.round(100 * report.score);
+  var rows = [
+    ["task_completed", report.task_completed],
+    ["tool_success_rate", report.tool_success_rate],
+    ["tool_call_count", report.tool_call_count],
+    ["execution_steps", report.execution_steps],
+    ["peak_context_tokens", report.peak_context_tokens],
+    ["final_context_tokens", report.final_context_tokens],
+    ["compaction_count", report.compaction_count],
+    ["context_efficiency", report.context_efficiency],
+    ["step_efficiency", report.step_efficiency],
+    ["compaction_efficiency", report.compaction_efficiency]
+  ].map(function (pair) {
+    return "<tr><td class='mono'>" + pair[0] + "</td><td class='mono'>" + pair[1] + "</td></tr>";
+  }).join("");
+  box.className = "";
+  box.innerHTML =
+    "<div style='margin-bottom:8px'>score <span class='mono' style='font-size:20px;color:var(--accent)'>" +
+    report.score.toFixed(4) + "</span> / 1.00 " +
+    "<span class='bar' style='width:" + Math.max(pct * 3, 6) + "px'></span></div>" +
+    "<table><tr><th>metric</th><th>value</th></tr>" + rows + "</table>";
+}
+
+function selectSession(sessionId) {
+  currentSessionId = sessionId;
+  refreshSessions();
+  fetchJson("/api/sessions/" + sessionId).then(function (r) { if (r.ok) renderDetail(r.body); });
+  fetchJson("/api/sessions/" + sessionId + "/events").then(function (r) { if (r.ok) renderTimeline(r.body); });
+  fetchJson("/api/sessions/" + sessionId + "/prompt-snapshots").then(renderPrompt);
+  fetchJson("/api/sessions/" + sessionId + "/context-snapshots").then(renderContext);
+  fetchJson("/api/sessions/" + sessionId + "/replay").then(renderReplay);
+  fetchJson("/api/sessions/" + sessionId + "/evaluation").then(renderEvaluation);
+}
+
+el("run-simple").addEventListener("click", function () { createRun("simple"); });
+el("run-compaction").addEventListener("click", function () { createRun("compaction"); });
+refreshSessions();
+</script>
+</body>
+</html>

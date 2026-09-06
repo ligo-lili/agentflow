@@ -1,0 +1,70 @@
+# AgentFlow
+
+**The Context Debugger and Observatory for AI Agents.**
+
+AgentFlow is a job-portfolio MVP for inspecting and evaluating an Agent's runtime behavior: prompt assembly, context composition, tool calls, context growth, compaction and execution trajectory.
+
+## MVP flow
+
+```text
+offline task → Agent Runtime → Prompt/Context snapshots → Tool calls
+→ Context growth → Compaction → persisted trace → Inspector → Replay
+→ trajectory evaluation → strategy comparison
+```
+
+All of the above is implemented and offline-deterministic. The runtime uses a scripted `FakeModelProvider` by default, so every demo, test and benchmark runs without network access or an API key.
+
+## What is inside
+
+| Task | Deliverable | Where |
+|---|---|---|
+| T0 | Typed contracts: events, provider, tools, snapshots, stores | `packages/core`, `packages/observability` |
+| T1 | Single-agent runtime: `AgentSession` → bounded `AgentLoop` → `ToolRuntime` | `packages/runtime` |
+| T2 | SQLite persistence (events, snapshots, sessions) + reload | `packages/observability/sqlite.py` |
+| T3 | Prompt/Context snapshots, token budget (`PromptBuilder`, `ContextManager`) | `packages/context` |
+| T4 | Two deterministic compaction strategies (`keep_recent_summary`, `semantic_state`) | `packages/context/compaction.py` |
+| T5 | Timeline and replay from the event log alone (no re-execution) | `packages/observability/{timeline,replay}.py` |
+| T6 | FastAPI query API + local Web Inspector | `apps/api`, `apps/web/templates` |
+| T7 | Rule-based trajectory evaluation and A/B strategy comparison | `packages/evals`, `packages/experiments` |
+
+Design decisions are recorded in `docs/adr/`; per-task evidence reports (with actual command output) live in `docs/evidence/`.
+
+## Quick start
+
+```bash
+python -m pip install -e ".[dev]"
+make test        # 118 offline tests
+make lint        # ruff + mypy (strict on packages)
+make demo        # simple agent with a tool call, prints the event trace
+make web         # Inspector UI at http://127.0.0.1:8000
+```
+
+### Demos
+
+```bash
+python examples/simple_agent.py          # runtime: event trace, tool call, final answer
+python examples/context_growth_demo.py   # per-step context growth under a token budget
+python examples/persistence_reload.py    # two real processes: write to SQLite, reload, compare
+python examples/replay_demo.py           # replay a session from the event log alone
+python examples/compaction_compare.py    # A/B: both compaction strategies, metrics, score, winner
+```
+
+### Inspector
+
+`make web` (or `uvicorn apps.api.main:app`) serves the local Inspector. The page creates an offline run and shows Session Timeline, Prompt Sections, Context Breakdown, snapshot history, Tool Calls, Compaction before/after, Replay (from the event log — never calls a provider or tool) and the Evaluation Summary. The API also exposes the raw surfaces: `GET /api/sessions`, `/events`, `/prompt-snapshots`, `/context-snapshots`, `/replay`, `/evaluation`.
+
+## Scope
+
+The MVP is an offline-first Python runtime with SQLite persistence, a FastAPI query API and a lightweight web Inspector. It does not include a coding-agent replacement, voice/browser/desktop automation, multi-tenant SaaS, vector-first RAG, model training or complex multi-agent orchestration.
+
+## Documentation map
+
+- [Product vision](docs/product/vision.md), [target user](docs/product/target-user.md), [scope](docs/product/scope.md)
+- [Architecture overview](docs/architecture/overview.md), [runtime](docs/architecture/runtime.md), [context engine](docs/architecture/context-engine.md), [event model](docs/architecture/event-model.md), [evaluation](docs/architecture/evaluation.md)
+- [Roadmap and task ownership](docs/roadmap/README.md)
+- [Architecture decisions](docs/adr/)
+- [Evidence index](docs/evidence/README.md) — per-task reports and the [final portfolio report](docs/evidence/final-report.md)
+
+## Success criteria
+
+The project succeeds when a developer can explain why an Agent behaved a certain way, inspect prompt/context lifecycle, replay recorded events without re-running tools or models, and prove that two context strategies are measurably different. All four are demonstrated in `docs/evidence/final-report.md`.
