@@ -350,7 +350,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     )
     def prompt_snapshots(session_id: str, request: Request) -> list[PromptSnapshot]:
         _require_session(request, session_id)
-        return request.app.state.snapshot_store.get_prompt_snapshots(session_id)
+        store: SqliteSnapshotStore = request.app.state.snapshot_store
+        return store.get_prompt_snapshots(session_id)
 
     @app.get(
         "/api/sessions/{session_id}/context-snapshots",
@@ -359,7 +360,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     )
     def context_snapshots(session_id: str, request: Request) -> list[ContextSnapshot]:
         _require_session(request, session_id)
-        return request.app.state.snapshot_store.get_context_snapshots(session_id)
+        store: SqliteSnapshotStore = request.app.state.snapshot_store
+        return store.get_context_snapshots(session_id)
 
     @app.get(
         "/api/sessions/{session_id}/replay",

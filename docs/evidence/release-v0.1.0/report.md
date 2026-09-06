@@ -124,5 +124,6 @@ fault checks OK (all failures typed, no key or body leaked)
 ## 6. Follow-up Needed
 
 - [x] 真实端点冒烟:已完成,见第 3.1 节(2026-09-06)。
-- [ ] 推送后在 GitHub Actions 确认 Ubuntu+Windows × 3.11/3.13 矩阵与
-  wheel 作业绿灯(沙箱无 gh CLI,无法本地观测)。
+- [x] GitHub Actions 矩阵绿灯:已实测确认(2026-09-06,全部 7 次运行
+  success,含 v0.1.0 提交;详见 `docs/evidence/portfolio-polish/report.md`
+  第 3.1 节)。

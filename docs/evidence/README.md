@@ -18,6 +18,7 @@ Required reports:
 - `review-r7/report.md` (optional OpenAI-compatible provider smoke path)
 - `review-r9-r10/report.md` (Inspector polish, visual walkthrough with screenshots, portfolio narrative)
 - `release-v0.1.0/report.md` (release close-out: smoke script, doc drift fixes, v0.1.0 tag)
+- `portfolio-polish/report.md` (portfolio presentation: LICENSE, badges, screenshots, mypy scope, estimator calibration)
 
 Reports must show actual test/demo output; “implemented successfully” alone is not evidence. Keep secrets and API keys out of reports.
 

@@ -11,7 +11,7 @@ coverage:
 
 lint:
 	ruff check .
-	mypy packages
+	mypy packages apps
 
 demo:
 	python examples/simple_agent.py

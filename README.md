@@ -2,6 +2,10 @@
 
 **The Context Debugger and Observatory for AI Agents.**
 
+[![CI](https://github.com/ligo-lili/agentflow/actions/workflows/ci.yml/badge.svg)](https://github.com/ligo-lili/agentflow/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.13-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 AgentFlow is a job-portfolio MVP for inspecting and evaluating an Agent's runtime behavior: prompt assembly, context composition, tool calls, context growth, compaction and execution trajectory.
 
 ## MVP flow
@@ -15,6 +19,18 @@ offline task → Agent Runtime → Prompt/Context snapshots → Tool calls
 All of the above is implemented and offline-deterministic. The runtime uses a scripted `FakeModelProvider` by default, so every demo, test and benchmark runs without network access or an API key.
 
 Recorded runs are guarded by explicit contracts: provider/tool deadlines that can never report timed-out work as success, versioned SQLite schema with an atomic session projection, formal replay integrity (corrupt or truncated traces are rejected, live ones still replay), typed API responses with a stable error envelope, and auditable token counting with estimator-mismatch rejection (docs/architecture/{runtime,persistence,event-model,api,context-engine,evaluation}.md). The A/B evaluation runs a versioned three-scenario suite with semantic survival checks and weight-sensitivity reporting.
+
+## What it looks like
+
+The local Inspector — per-step timeline, prompt sections with token
+breakdown, context budget history, compaction before/after, replay from the
+event log alone:
+
+![Inspector session view](docs/evidence/review-r9-r10/screenshots/desktop-deeplink-compaction-session.png)
+
+A corrupted trace is flagged, never silently replayed:
+
+![Replay integrity](docs/evidence/review-r9-r10/screenshots/corrupt-trace-replay-panel.png)
 
 ## What is inside
 
@@ -35,8 +51,8 @@ Design decisions are recorded in `docs/adr/`; per-task evidence reports (with ac
 
 ```bash
 python -m pip install -e ".[dev]"
-make test        # 189 offline tests
-make lint        # ruff + mypy (strict on packages)
+make test        # 198 offline tests
+make lint        # ruff + mypy (strict on packages and apps)
 make coverage    # 95% measured, 80% floor enforced
 make demo        # simple agent with a tool call, prints the event trace
 make web         # Inspector UI at http://127.0.0.1:8000
@@ -89,3 +105,7 @@ gate production use:
 ## Success criteria
 
 The project succeeds when a developer can explain why an Agent behaved a certain way, inspect prompt/context lifecycle, replay recorded events without re-running tools or models, and prove that two context strategies are measurably different. All four are demonstrated in `docs/evidence/final-report.md`.
+
+## License
+
+[MIT](LICENSE)

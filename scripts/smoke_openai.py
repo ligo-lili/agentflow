@@ -64,7 +64,7 @@ Or write those three variables into a gitignored .env and run with:
 See .env.example and docs/evidence/review-r7/report.md section 4."""
 
 
-def _parse_env_file(path: str) -> dict[str, str]:
+def parse_env_file(path: str) -> dict[str, str]:
     """Parse a dotenv-style file: KEY=VALUE lines, ``#`` comments, optional
     ``export `` prefix, surrounding quotes stripped. Malformed lines are
     skipped with a note instead of aborting the smoke."""
@@ -186,7 +186,7 @@ def main(
         if not Path(env_file).is_file():
             print(f"env file not found: {env_file}")
             return 2
-        environ = {**environ, **_parse_env_file(env_file)}
+        environ = {**environ, **parse_env_file(env_file)}
 
     try:
         provider = OpenAICompatProvider.from_env(environ)

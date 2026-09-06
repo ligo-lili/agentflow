@@ -200,7 +200,7 @@ def test_parse_env_file_skips_malformed_lines(script: Any, capsys: Any, tmp_path
         "=novalue\n",
         encoding="utf-8",
     )
-    values = script._parse_env_file(str(env_file))
+    values = script.parse_env_file(str(env_file))
     out = capsys.readouterr().out
     assert values == {"A": "1"}
     assert out.count("skipping malformed line") == 2

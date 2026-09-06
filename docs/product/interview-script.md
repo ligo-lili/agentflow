@@ -71,15 +71,18 @@ to versioned fixtures (Chinese text, JSON, tool schemas, empty content).
 - Events are the only integration boundary (no UI/replay/eval reaches into
   the loop); snapshots are first-class; everything is offline-deterministic
   by construction (scripted provider, fixed fixtures, byte-stable suites).
-- 189 offline tests, ruff + mypy `--strict`, 96% core coverage with an
+- 198 offline tests, ruff + mypy `--strict`, 95% core coverage with an
   enforced 80% floor, Windows + Linux CI, wheel build smoke.
 - **Limits, stated plainly**: the token estimator is an engineering proxy
   (not billing tokens); single-process SQLite; no auth; task completion is
   rule-based; the API runs offline scenarios synchronously. This is a
   complete MVP — deliberately not production-ready.
-- If asked what is next: real-provider smoke path exists behind an extra
-  (`openai-compat`) with mocked contract tests; production work would start
-  at auth, concurrency and streaming.
+- If asked about real providers: the `openai-compat` adapter behind the
+  optional extra has been smoke-tested against a real endpoint — happy path
+  plus three injected failures (timeout, invalid credential, unroutable
+  base URL), all typed and redacted; the credentials never appeared in any
+  output (docs/evidence/release-v0.1.0/report.md §3.1). Production work
+  would start at auth, concurrency and streaming.
 
 ## Fallbacks
 

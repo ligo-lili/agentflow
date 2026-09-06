@@ -62,7 +62,7 @@ target-version = "py311"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-packages = ["packages"]
+packages = ["packages", "apps"]
 
 # tiktoken is an optional extra (packages[tokenizer]); the estimator degrades
 # to the deterministic fallback when it is absent.
