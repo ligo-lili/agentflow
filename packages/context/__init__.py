@@ -9,16 +9,19 @@ from packages.context.compaction import (
 )
 from packages.context.estimator import (
     DeterministicEstimator,
+    EstimatorMismatchError,
     EstimatorUnavailableError,
     TiktokenEstimator,
     TokenEstimator,
     create_estimator,
 )
-from packages.context.fixture import canonical_messages
+from packages.context.fixture import AUDIT_FIXTURE_VERSION, AUDIT_TEXTS, canonical_messages
 from packages.context.manager import ContextBuild, ContextManager, count_by_role
 from packages.context.prompt import PromptBuilder, PromptSections
 
 __all__ = [
+    "AUDIT_FIXTURE_VERSION",
+    "AUDIT_TEXTS",
     "BudgetConfig",
     "BudgetReport",
     "CompactionConfig",
@@ -28,6 +31,7 @@ __all__ = [
     "ContextBuild",
     "ContextManager",
     "DeterministicEstimator",
+    "EstimatorMismatchError",
     "EstimatorUnavailableError",
     "PromptBuilder",
     "PromptSections",

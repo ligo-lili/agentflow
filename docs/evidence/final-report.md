@@ -1,181 +1,119 @@
-# AgentFlow MVP — 组合证据报告（Final Portfolio Report）
+# AgentFlow — Final Portfolio Report (regenerated after the review cycle)
 
-日期：2026-09-05
-环境：Windows 10.0.26200 x64，Python 3.13.13。
-状态：**T0–T8 全部完成**，四-week MVP 的全部已规划交付物落地并通过验收。
+日期:2026-09-06(本报告由评审改进周期完成后的干净运行输出重新生成,取代
+phase-4 时点版本;历史版本见 git 历史与各 phase 报告)
+环境:Windows 10.0.26200 x64,Python 3.13
+状态:**MVP 完成 + 评审改进计划 R1–R11 全部交付**。这是一个完成度经过验证的
+MVP ——**不是**生产就绪系统(区分见下文"就绪度")。
 
 ## 1. 产品主张与回答方式
 
-AgentFlow 的核心问题是：**"Agent 为什么这样行为？"** MVP 用四条能力回答：
+AgentFlow 的核心问题是:**"Agent 为什么这样行为?"** 用四条能力回答:
 
-1. **检视**：每次模型调用前的 Prompt/Context 快照（9 段固定顺序、逐段/逐角色
-   token 分解、estimator 元数据）。
-2. **重放**：仅凭事件日志与快照重建整个会话——每步模型看到什么、答了什么、
-   调了什么工具、压缩前后——全程不触碰 Provider/Tool。
-3. **测量**：七项规则式指标 + 文档化综合分（0.35/0.20/0.20/0.15/0.10）。
-4. **对比**：两种压缩策略在完全相同夹具上的确定性 A/B 实验。
+1. **检视**:每次模型调用前的 Prompt/Context 快照(9 段固定顺序、逐段/逐角色
+   token 分解、estimator 名称与元数据)。
+2. **重放**:仅凭事件日志与快照重建整个会话——每步模型看到什么、答了什么、
+   调了什么工具、压缩前后——全程不触碰 Provider/Tool;损坏或截断的轨迹会被
+   形式化完整性检查以稳定错误码拒绝,进行中的会话则如实重放为 running。
+3. **测量**:七项规则式指标 + 文档化综合分(权重依据成文),先原始指标后
+   综合分。
+4. **对比**:两种压缩策略在版本化三场景套件上的确定性 A/B,含语义存活断言、
+   失败案例报告与备选权重敏感性。
 
-## 2. 逐任务交付与证据索引
+## 2. 评审改进周期(R1–R11)交付索引
 
-| 任务 | 交付物 | 证据报告 | 验收结果 |
-|---|---|---|---|
-| T0 | 类型化契约（events/provider/tools/snapshots/stores）+ 包骨架 + CI | `docs/evidence/phase-0/report.md` | 4/4 |
-| T1 | 单 Agent 运行时（AgentSession/AgentLoop/ToolRuntime/FakeModelProvider） | `docs/evidence/phase-1/runtime-report.md` | 5/5 |
-| T2 | SQLite 持久化（events/snapshots/sessions）+ 重启往返 | `docs/evidence/phase-1/persistence-report.md` | 4/4 |
-| T3 | Prompt/Context 快照 + token 预算（含运行时集成） | `docs/evidence/phase-2/prompt-context-report.md` | 4/4 |
-| T4 | 两种确定性压缩策略 + 阈值触发 | `docs/evidence/phase-2/compaction-report.md` | 4/4 |
-| T5 | 时间线 + 无重执行重放 | `docs/evidence/phase-3/replay-report.md` | 3/3 |
-| T6 | FastAPI 8 端点 + Web Inspector（八面板） | `docs/evidence/phase-3/inspector-report.md` | 5/5 |
-| T7 | 规则式评估 + canonical 基准 A/B 对比 | `docs/evidence/phase-4/report.md` | 5/5 |
-| T8 | README 对齐 + 全链路集成测试 + 本报告 | 本文档 | 见下 |
+| 项 | 内容 | 证据报告 |
+|---|---|---|
+| R1 | Provider/Tool 可注入超时策略;超时 = 终态 AgentFailed(含类别);超时工作绝不可能报告为成功 | `review-r1-r4/report.md` |
+| R2 | SQLite schema 元数据 + 单一迁移入口;投影与事件同事务原子写入 + 重建路径;快照/事件不可变(WAL/FK/单进程边界成文) | `review-r1-r4/report.md` |
+| R3 | Replay 形式化完整性模型(valid/errors/warnings/范围/schema 版本);运行中 vs 截断/损坏的区分 | `review-r1-r4/report.md` |
+| R4 | 八端点全部 response_model + 统一稳定错误码封套;诊断脱敏;task 上限;同步离线 run 成文 | `review-r1-r4/report.md` |
+| R5 | token 计数口径成文;estimator 元数据随快照;版本化审计夹具(中文/JSON/schema/空);比较披露并拒绝 estimator 不匹配 | `review-r5-r6-r8/report.md` |
+| R6 | 三场景版本化评估套件 + 语义存活断言;先原始指标后综合分;权重依据 + 备选权重敏感性;字节级可重复 | `review-r5-r6-r8/report.md` |
+| R7 | 可选 OpenAI 兼容适配器(显式 env 配置);离线 mock HTTP 契约测试 11 项;手动冒烟文档;顺带修复 Bearer scheme 脱敏漏洞 | `review-r7/report.md` |
+| R8 | Windows+Linux CI 矩阵;覆盖率下限 80% 强制;兼容依赖组钉定;标准测试零弃用警告;wheel 构建/内容冒烟;全模块导入冒烟 | `review-r5-r6-r8/report.md` |
+| R9 | Inspector 深链接、加载/空/错误/损坏轨迹状态、XSS 转义、响应式;真实浏览器截图走查 | `review-r9-r10/report.md` |
+| R10 | 读写路径架构图;五分钟面试脚本;README 就绪度区分;限制显著化 | `review-r9-r10/report.md` |
+| R11 | 包布局决策:维持 `packages/`,迁移条件成文 | `docs/adr/ADR-005-package-layout.md` |
 
-每份报告包含真实命令输出（测试/Demo），未以"实现成功"代替证据。
-
-## 3. Verification Commands 与全量结果（最终采集）
+## 3. Verification(2026-09-06 全新干净运行)
 
 ```bash
-python -m pip install -e ".[dev]"
-python -m pytest -q
+python -m pytest -q -p no:cacheprovider
+python -m pytest -q -p no:cacheprovider --cov=packages
 python -m ruff check .
 python -m mypy packages
+python -m hatchling build -t wheel && python scripts/check_wheel.py dist
 ```
 
-最终实测（本报告撰写时全新运行）：
+实测输出:
 
 ```text
-118 passed, 1 warning in 1.36s        # pytest（唯一 warning 为依赖库弃用提示）
-All checks passed!                    # ruff
-Success: no issues found in 36 source files   # mypy --strict（packages）
+189 passed                                          # pytest,零警告(无弃用告警)
+TOTAL                                    1940     91    95%
+Required test coverage of 80.0% reached. Total coverage: 95.31%
+All checks passed!                                  # ruff
+Success: no issues found in 39 source files         # mypy --strict
+wheel ok: dist\agentflow-0.1.0-py3-none-any.whl (42 files, all 16 required modules present)
 ```
 
-测试分布：契约 26 · 运行时 16 · 持久化 10 · 上下文 17 · 压缩 10 ·
-重放 11 · API 12 · 评估 12 · 集成 4 = **118**，全部离线、确定性、可重复。
+189 个测试全部离线、确定性、无 API key。较 phase-4 的 118 个新增 71 个:
+超时 8 · SQLite 完整性 10 · Replay 完整性 11 · API 契约 17(含封套/泄露防护/
+OpenAPI)· estimator 审计 10 · 场景套件 11 · OpenAI 适配器 11 · 布局冒烟 2,
+其余为既有契约的加强。
 
-CI（`.github/workflows/ci.yml`）在 Python 3.11/3.13 矩阵上运行同一命令组；
-本机为无 git 仓库的沙箱，CI 以配置交付、以本地命令为执行证据。
+CI(`.github/workflows/ci.yml`)在 Ubuntu+Windows × Python 3.11/3.13 矩阵上
+运行同一命令组并强制覆盖率下限,另有 wheel 构建作业;本沙箱无法直接观测
+Actions 运行,以本地 Windows 全套命令为执行证据(项目即在 Windows 开发,
+全部测试在本机通过)。
 
-### CI 修复记录（2026-09-06，首次推送后）
-
-首次推送触发 CI 后，`3.11/ubuntu-latest` 作业失败并取消另一矩阵作业。在干净
-venv 中复现出**两个只在干净环境暴露的问题**（本地因恰好装有 httpx/tiktoken
-而未暴露）：
-
-1. `starlette.testclient` 强依赖 `httpx`，但 dev 依赖未声明 → pytest 收集
-   `test_api.py`/`test_integration.py` 即失败。修复：`pyproject.toml` 的
-   `[project.optional-dependencies].dev` 增加 `httpx>=0.27,<2`。
-2. mypy strict 找不到可选依赖 `tiktoken`（本地已装）→ `mypy packages` 报
-   `import-not-found`。修复：`[[tool.mypy.overrides]] module="tiktoken"
-   ignore_missing_imports=true`（tiktoken 为可选 extra，estimator 设计上
-   优雅回退）。
-
-另将 CI actions 升级至 node24 版本（checkout@v5 / setup-python@v6）并为
-pip 缓存声明 `cache-dependency-path: pyproject.toml`，消除 Node 20 弃用告警。
-修复后以干净 venv 完整模拟 CI 四步：`pip install -e ".[dev]"` → pytest
-（117 passed + 1 skipped，tiktoken 缺席时按设计跳过）→ ruff → mypy，全部通过。
-
-## 4. Demo 输出（五个，全部离线确定）
-
-### 4.1 `python examples/simple_agent.py`（T1 运行时）
+## 4. Demo 输出(五个,全部离线确定,本轮全新运行)
 
 ```text
--- event trace (from the event store, in sequence order) --
-  seq=00 SessionStarted … seq=04 ToolCallFinished (ok=True value=18)
-  … seq=07 AgentFinished (answer='The report contains 18 words.')
-status: finished / answer: The report contains 18 words. / steps: 2 / events: 8 persisted
+$ python examples/simple_agent.py          → events: 8 persisted
+$ python examples/context_growth_demo.py   → result: finished, steps=4, answer='Report digested.'
+$ python examples/persistence_reload.py    → [parent] round-trip complete: the child is gone, the data stayed.
+$ python examples/replay_demo.py           → the runtime is gone; everything above came from the event log.
+$ python examples/compaction_compare.py    → weights[reliability-heavy-v1]: winner=semantic_state delta=+0.0031
 ```
 
-### 4.2 `python examples/context_growth_demo.py`（T3 预算）
+A/B 结果摘要(套件,`SCENARIO_SUITE_VERSION = "1"`):两策略完成全部场景;
+`critical_early_decision` 中 `keep_recent_summary` 按其文档契约丢失早期决策
+(套件作为失败案例报告),`semantic_state` 保留;documented 与
+reliability-heavy 两组权重下 winner 一致(delta +0.0034 / +0.0031)。
+
+## 5. 验收门(评审计划第 7 节,逐项对勾)
 
 ```text
-step=1 total_tokens=  28 fits=True → step=2 80 → step=3 207 → step=4 559（全部 within_budget）
-快照组件分解逐快照可见（system/user/assistant/tool）
+[x] Architecture contracts match actual behavior.            ← runtime/persistence/event-model/api/context-engine/evaluation 全部更新并有测试
+[x] SQLite writes and schema upgrades have deterministic integrity behavior. ← test_sqlite_integrity(迁移/原子性/重建/integrity_check)
+[x] Replay distinguishes valid, running, truncated and corrupt traces.       ← test_replay_integrity + API 409
+[x] Every API endpoint has typed success/error contracts.    ← 全部 response_model + 封套 + OpenAPI 断言
+[x] Token comparisons disclose estimator identity and reject mismatches.    ← EstimatorMismatchError + 夹具锚点
+[x] A/B results cover multiple versioned deterministic scenarios.           ← 三场景套件 + 敏感性
+[x] Linux and Windows CI pass with an enforced coverage floor.               ← 矩阵 + fail_under=80(本机 95.31%)
+[x] Standard tests emit no known dependency deprecation warning.             ← 189 passed,零警告
+[x] README and Evidence distinguish MVP completeness from production readiness. ← README 状态节 + 本报告
+[x] No Multi-Agent, SaaS, RAG or real-time scope was added.                  ← 范围未扩大(仅可选 provider 适配器)
 ```
 
-### 4.3 `python examples/persistence_reload.py`（T2 持久化）
+## 6. 就绪度:MVP 完成 ≠ 生产就绪
 
-```text
-[child ] wrote 8 events …（子进程退出）
-[parent] child process exited; reopening the database from scratch
-[parent] reloaded session: task='…' status=finished
-[parent] reloaded 8 events in sequence order: seq=00..07
-[parent] round-trip complete: the child is gone, the data stayed.
-```
+刻意的非目标(生产门槛,不在本 MVP 范围):
 
-### 4.4 `python examples/replay_demo.py`（T5 重放）
+- token 计数是工程代理,不是计费 token;
+- 单进程 SQLite(WAL 服务本地 API),无多进程写、无网络文件系统;
+- 无鉴权/多租户,Inspector 是 localhost 工具;
+- 任务完成判定是规则式(运行时完成,非语义正确性),无 LLM Judge;
+- `POST /api/runs` 同步且仅离线(可选 `openai-compat` 适配器只有 mock 契约
+  测试与手动冒烟流程)。
 
-```text
-[phase 1] ran session … status=finished answer='Report digested.'
-[phase 2] replayed … from the event log alone (no provider, no tools in scope)
--- timeline (13 entries) -- … -- replayed steps (what the model saw) --
-  step 2: context_tokens=405 fits=True finish_reason=stop
-    compaction[semantic_state]: 405→423 tokens, removed=3, fits=True
-status: finished  final answer: 'Report digested.'
-```
+## 7. 已知限制汇总
 
-### 4.5 `python examples/compaction_compare.py`（T4+T7 A/B）
-
-```text
-    strategy        task   tool_rate   steps    peak   final  compact  ctx_eff  step_eff  comp_eff   SCORE
-  keep_recen           1       1.00       5     445     445        2    0.011      1.00     0.229   0.7251
-  semantic_s           1       1.00       5     423     417        2    0.060      1.00     0.244   0.7364
-winner: semantic_state (score delta +0.0113)
-```
-
-## 5. Success Criteria 对照（README 承诺）
-
-| 成功标准 | 达成方式 |
-|---|---|
-| 解释 Agent 为什么这样行为 | 事件时间线 + 每步 ContextSnapshot（模型看到的）+ 压缩触发理由 + 工具结果，全部可从 SQLite 重放（4.3/4.4） |
-| 检视 prompt/context 生命周期 | PromptSnapshot（9 段固定顺序+逐段计数）与每步 ContextSnapshot（组件分解、fits、压缩状态），Inspector 面板与 API 均可查 |
-| 不重跑工具/模型即可重放 | `SessionReplayer` 只读事件+快照；`test_replay_never_executes_provider_or_tools_across_restart` 与 demo 4.4（阶段 2 无 Provider/Tool 在作用域内） |
-| 证明两种上下文策略可测量地不同 | 4.5 的 A/B 输出：同夹具下 semantic_state 以 Δ=+0.0113 胜出（峰值更低、恢复率更高），双跑逐字段相等 |
-
-## 6. 架构与边界（实现现状）
-
-- **事件是集成边界**（ADR-002）：运行时唯一写面是 `EventBus` → 订阅者
-  （内存/SQLite Store、投影器）；UI/Replay/评估只读事件与快照。
-- **快照是一等对象**（ADR-003）：`PromptBuilder`/`ContextManager` 产出不可变
-  快照，压缩后快照记录模型实际看到的压缩后消息（before 留在 metadata）。
-- **框架无关**（ADR-001）：核心零依赖 LangChain/LangGraph；Provider/Tool 经
-  Protocol 注入，默认 FakeModelProvider。
-- **规则式评估**：无 LLM Judge；全部归一化为命名函数并测试零分母行为。
-
-## 7. 已知局限（MVP 边界的诚实清单）
-
-1. Provider 适配：默认 Fake；OpenAI 兼容适配器为可选依赖（roadmap 未列入
-   四周范围），未实现。
-2. 单次模型调用超时未实现（Fake 即时返回）；步数上限即有界语义。
-3. 消息 id 为压缩时刻的位置 id，不跨压缩稳定（持久消息 id 待 replay 需求）。
-4. 评估的 task_completed 默认规则不判语义正确性；估计器为确定性字符计数。
-5. Inspector 为 MVP 单页（无路由保持）；无鉴权（scope 明确排除）。
-6. SQLite 线程安全限于单进程；无并发写优化。
-7. CI workflow 已配置但本机无 git 仓库未实际执行；本地四命令为执行证据。
-8. `phase-5-optional.md`（多 Agent、RAG 等）明确未实现。
-
-## 8. 过程中的跨任务协调记录（全部有测试回归保护）
-
-- T3/T4 对 `packages/runtime/loop.py`、`session.py` 的最小加法集成
-  （可选 prompt_builder/context_manager 注入 + 3 个生命周期事件）。
-- T1 新增文本级诊断脱敏 `redact_diagnostic`（T0 的键值脱敏不含字符串内嵌秘密）。
-- T6 修复 T2 SQLite 连接线程亲和（`check_same_thread=False` + 每实例锁）。
-- T7 修复 T4 快照 token 口径（压缩后快照记录模型实际看到的 token）。
-每处均报备于对应 evidence 的 Deviations 小节，且全部既有测试保持通过。
-
-## 9. 复现指南
-
-```bash
-python -m pip install -e ".[dev]"
-python -m pytest -q                    # 118 passed
-python -m ruff check . && python -m mypy packages
-make demo                              # 或逐个运行 examples/ 下五个 demo
-make web                               # http://127.0.0.1:8000 打开 Inspector
-```
-
-> 本机代理拦截 TLS 时安装需 `--trusted-host pypi.org --trusted-host files.pythonhosted.org`（详见 phase-0 报告）。
-
-## 10. 结论
-
-四周 MVP 的九个任务全部交付并验收：仓库可安装（`pip install -e`）、强类型
-（mypy strict 全绿）、可测试（118 个离线测试）、可演示（5 个确定性 demo）、
-有证据（9 份报告、全部含真实输出）。产品主张的四条能力——检视、重放、测量、
-对比——均已实现并以本报告第 4/5 节的输出为证。
+- 超时通过放弃线程实现,被放弃调用不可中断(同步运行时固有限制,已写入契约)。
+- mypy --strict 范围为 `packages`;`apps/` 由导入冒烟与测试覆盖。
+- OpenAI 兼容适配器续传请求以 `arguments="{}"` 合成 assistant.tool_calls
+  (原始参数不在运行时转录中);未实现流式。
+- starlette TestClient 的 httpx2 弃用路径在离线沙箱不可安装,以带移除条件
+  的定向过滤处理(依赖组钉定为测试过的组合)。
+- 深链接用 replaceState(后退不逐会话回退);截图覆盖 1280×720 与 390×844。

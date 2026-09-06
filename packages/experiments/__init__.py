@@ -1,4 +1,4 @@
-"""Experiments: A/B comparison of context strategies over the canonical benchmark (T7)."""
+"""Experiments: A/B comparison and the versioned scenario suite (T7, R6)."""
 
 from packages.experiments.compare import (
     CANONICAL_BASELINE_STEPS,
@@ -8,16 +8,50 @@ from packages.experiments.compare import (
     StrategyComparison,
     build_benchmark_session,
     compare_strategies,
+    compare_strategy_reports,
+    estimator_name_of,
     run_benchmark,
+)
+from packages.experiments.suite import (
+    ALTERNATE_WEIGHTS,
+    DOCUMENTED_WEIGHTS,
+    SCENARIO_SUITE_VERSION,
+    CheckFailure,
+    CheckResult,
+    Scenario,
+    ScenarioResult,
+    StrategyAggregate,
+    SuiteReport,
+    WeightSensitivity,
+    build_scenario_session,
+    iter_scenarios,
+    run_scenario,
+    run_suite,
 )
 
 __all__ = [
+    "ALTERNATE_WEIGHTS",
     "CANONICAL_BASELINE_STEPS",
     "CANONICAL_BUDGET",
     "CANONICAL_STRATEGIES",
+    "DOCUMENTED_WEIGHTS",
+    "SCENARIO_SUITE_VERSION",
+    "CheckFailure",
+    "CheckResult",
     "ComparisonReport",
+    "Scenario",
+    "ScenarioResult",
+    "StrategyAggregate",
     "StrategyComparison",
+    "SuiteReport",
+    "WeightSensitivity",
     "build_benchmark_session",
+    "build_scenario_session",
     "compare_strategies",
+    "compare_strategy_reports",
+    "estimator_name_of",
+    "iter_scenarios",
     "run_benchmark",
+    "run_scenario",
+    "run_suite",
 ]

@@ -77,6 +77,11 @@ class ContextManager:
                 effective_messages = compaction.messages
 
         metadata: dict[str, Any] = {"step": step}
+        estimator_metadata = getattr(self._estimator, "metadata", None)
+        if isinstance(estimator_metadata, dict) and estimator_metadata:
+            # Optional duck-typed extension (review R5): encoding/model/formula
+            # provenance travels with the snapshot when the estimator exposes it.
+            metadata["estimator_metadata"] = dict(estimator_metadata)
         if compaction is not None:
             metadata["compaction"] = {
                 "strategy": compaction.strategy,

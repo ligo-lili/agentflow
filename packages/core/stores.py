@@ -42,7 +42,11 @@ class EventStore(Protocol):
 
 @runtime_checkable
 class SnapshotStore(Protocol):
-    """Persistence for prompt and context snapshots."""
+    """Persistence for prompt and context snapshots.
+
+    Snapshots are immutable evidence: implementations must reject a duplicate
+    snapshot id with ``StoreError`` instead of silently replacing the record.
+    """
 
     def save_prompt_snapshot(self, snapshot: PromptSnapshot) -> None: ...
 

@@ -9,6 +9,8 @@ from packages.observability.inmemory import (
 from packages.observability.replay import (
     CompactionReplay,
     ReplayError,
+    ReplayIntegrity,
+    ReplayIssue,
     ReplayStep,
     SessionReplay,
     SessionReplayer,
@@ -16,11 +18,14 @@ from packages.observability.replay import (
 )
 from packages.observability.sqlite import (
     DEFAULT_DB_PATH,
+    SCHEMA_VERSION,
     SessionNotFoundError,
+    SqliteDatabase,
     SqliteEventStore,
     SqlitePersistence,
     SqliteSessionStore,
     SqliteSnapshotStore,
+    apply_migrations,
 )
 from packages.observability.timeline import (
     SessionTimeline,
@@ -31,18 +36,22 @@ from packages.observability.timeline import (
 
 __all__ = [
     "DEFAULT_DB_PATH",
+    "SCHEMA_VERSION",
     "CompactionReplay",
     "EventBus",
     "InMemoryEventStore",
     "InMemorySessionStore",
     "InMemorySnapshotStore",
     "ReplayError",
+    "ReplayIntegrity",
+    "ReplayIssue",
     "ReplayStep",
     "SessionNotFoundError",
     "SessionReplay",
     "SessionReplayer",
     "SessionTimeline",
     "SessionTimelineBuilder",
+    "SqliteDatabase",
     "SqliteEventStore",
     "SqlitePersistence",
     "SqliteSessionStore",
@@ -50,4 +59,5 @@ __all__ = [
     "TimelineEntry",
     "ToolCallReplay",
     "UnknownSessionError",
+    "apply_migrations",
 ]

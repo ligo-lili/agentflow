@@ -20,6 +20,7 @@ from packages.observability.eventbus import EventBus
 from packages.observability.inmemory import InMemoryEventStore
 from packages.runtime.loop import AgentLoop, AgentLoopConfig, AgentRunResult
 from packages.runtime.recorder import EventRecorder
+from packages.runtime.timeouts import TimeoutPolicy
 from packages.runtime.tools import ToolRuntime
 
 
@@ -41,6 +42,7 @@ class AgentSession:
         session_id: str | None = None,
         prompt_builder: PromptBuilder | None = None,
         context_manager: ContextManager | None = None,
+        timeout_policy: TimeoutPolicy | None = None,
     ) -> None:
         self._task = task
         self._provider = provider
@@ -57,6 +59,7 @@ class AgentSession:
         self._recorder = EventRecorder(self._bus, self._session_id, self._trace_id)
         self._prompt_builder = prompt_builder
         self._context_manager = context_manager
+        self._timeout_policy = timeout_policy
         self._run_result: AgentRunResult | None = None
 
     @property
@@ -94,6 +97,8 @@ class AgentSession:
                 "task": self._task,
                 "model": self._config.model,
                 "max_steps": self._config.max_steps,
+                "provider_timeout_seconds": self._config.provider_timeout_seconds,
+                "tool_timeout_seconds": self._config.tool_timeout_seconds,
             },
         )
         loop = AgentLoop(
@@ -103,6 +108,7 @@ class AgentSession:
             self._config,
             prompt_builder=self._prompt_builder,
             context_manager=self._context_manager,
+            timeout_policy=self._timeout_policy,
         )
         self._run_result = loop.run(self._task)
         return self._run_result

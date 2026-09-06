@@ -33,6 +33,36 @@ def tool_observation(name: str, value: str, call_id: str) -> ModelMessage:
     )
 
 
+#: Versioned audit fixtures for estimator behavior (review R5). The exact
+#: deterministic counts of these texts are asserted in tests and recorded in
+#: Evidence, so any formula drift is caught on every supported Python version
+#: and platform. ``len`` counts Python characters, so the counts are
+#: identical across versions by construction; the literal anchors in the
+#: tests make any accidental change visible.
+AUDIT_FIXTURE_VERSION = 1
+
+AUDIT_TEXTS: dict[str, str] = {
+    "empty": "",
+    "ascii": "AgentFlow makes agent behavior inspectable, replayable and measurable.",
+    "chinese": "上下文工程让 Agent 的行为可检视、可度量、可重放。",
+    "json": json.dumps(
+        {"ok": True, "value": "report lines: revenue=1200 churn=3.2", "error": None},
+        ensure_ascii=False,
+    ),
+    "tool_schema": json.dumps(
+        {
+            "name": "word_count",
+            "description": "Count the words in the provided text.",
+            "parameters": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+            },
+        },
+        ensure_ascii=False,
+    ),
+}
+
+
 def canonical_messages() -> tuple[ModelMessage, ...]:
     """The fixed transcript both strategies are compared on."""
     return (

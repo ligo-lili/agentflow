@@ -33,3 +33,27 @@ def test_original_payload_is_not_mutated() -> None:
     payload = {"token": "t"}
     redact_payload(payload)
     assert payload["token"] == "t"
+
+
+def test_diagnostic_redacts_key_value_and_bearer_scheme() -> None:
+    from packages.runtime.diagnostics import redact_diagnostic
+
+    # The value may carry an auth scheme; the secret after it must not leak.
+    text = "connection refused near authorization=Bearer sk-secret-123456"
+    scrubbed = redact_diagnostic(text)
+    assert "sk-secret-123456" not in scrubbed
+    assert "authorization=[REDACTED]" in scrubbed
+
+    plain = redact_diagnostic("upstream 401: api_key=sk-secret-123 leaked")
+    assert "sk-secret-123" not in plain
+    assert "api_key=[REDACTED]" in plain
+
+
+def test_diagnostic_redacts_standalone_long_bearer_tokens_only() -> None:
+    from packages.runtime.diagnostics import redact_diagnostic
+
+    scrubbed = redact_diagnostic("Authorization header: Bearer abcdef1234567890abcdef")
+    assert "abcdef1234567890abcdef" not in scrubbed
+    # Ordinary prose after the word "bearer" is not mangled.
+    prose = redact_diagnostic("bearer tokens are issued by the provider")
+    assert "tokens are issued" in prose

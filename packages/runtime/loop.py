@@ -14,6 +14,7 @@ components are injected.
 from __future__ import annotations
 
 import json
+from functools import partial
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,17 +26,26 @@ from packages.core.provider import ModelMessage, ModelProvider, ModelRequest
 from packages.core.tools import ToolContext, ToolResult
 from packages.runtime.diagnostics import redact_diagnostic
 from packages.runtime.recorder import EventRecorder
+from packages.runtime.timeouts import TimeoutExceededError, TimeoutPolicy
 from packages.runtime.tools import ToolRuntime
 
 
 class AgentLoopConfig(BaseModel):
-    """Bounded-loop configuration."""
+    """Bounded-loop configuration.
+
+    ``provider_timeout_seconds`` / ``tool_timeout_seconds`` enforce explicit
+    wall-clock deadlines (``None`` disables the guard). A deadline breach is
+    terminal: the loop emits ``AgentFailed`` with the timeout category and
+    never reports timed-out work as success.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     model: str = "fake-model"
     max_steps: int = Field(default=8, ge=1)
     system_prompt: str | None = None
+    provider_timeout_seconds: float | None = Field(default=None, gt=0)
+    tool_timeout_seconds: float | None = Field(default=None, gt=0)
 
 
 class AgentRunResult(BaseModel):
@@ -62,6 +72,7 @@ class AgentLoop:
         config: AgentLoopConfig | None = None,
         prompt_builder: PromptBuilder | None = None,
         context_manager: ContextManager | None = None,
+        timeout_policy: TimeoutPolicy | None = None,
     ) -> None:
         self._recorder = recorder
         self._provider = provider
@@ -69,8 +80,22 @@ class AgentLoop:
         self._config = config or AgentLoopConfig()
         self._prompt_builder = prompt_builder
         self._context_manager = context_manager
+        # An injected policy is owned by the caller; a policy derived from the
+        # config is owned (and closed) by this loop.
+        self._owns_timeout_policy = timeout_policy is None
+        self._timeouts = timeout_policy or TimeoutPolicy(
+            self._config.provider_timeout_seconds,
+            self._config.tool_timeout_seconds,
+        )
 
     def run(self, task: str) -> AgentRunResult:
+        try:
+            return self._run(task)
+        finally:
+            if self._owns_timeout_policy:
+                self._timeouts.close()
+
+    def _run(self, task: str) -> AgentRunResult:
         messages: list[ModelMessage] = []
         if self._config.system_prompt is not None:
             messages.append(ModelMessage(role="system", content=self._config.system_prompt))
@@ -96,10 +121,14 @@ class AgentLoop:
                 {"step": steps, "model": request.model, "message_count": len(messages)},
             )
 
-            # Provider failures are diagnosable, never silent: they terminate
-            # the loop with a redacted AgentFailed diagnostic.
+            # Provider failures and deadline breaches are diagnosable, never
+            # silent: both terminate the loop with a redacted AgentFailed.
             try:
-                response = self._provider.invoke(request)
+                response = self._timeouts.run_provider(
+                    request.model, partial(self._provider.invoke, request)
+                )
+            except TimeoutExceededError as exc:
+                return self._fail_timeout(steps=steps, phase="provider", exc=exc)
             except Exception as exc:  # noqa: BLE001 - reported as AgentFailed below
                 return self._fail(
                     steps=steps,
@@ -142,7 +171,10 @@ class AgentLoop:
                 )
 
             for call in tool_calls:
-                result = self._execute_tool_call(call, steps)
+                try:
+                    result = self._execute_tool_call(call, steps)
+                except TimeoutExceededError as exc:
+                    return self._fail_timeout(steps=steps, phase="tool", exc=exc)
                 messages.append(
                     ModelMessage(
                         role="tool",
@@ -242,7 +274,31 @@ class AgentLoop:
             trace_id=self._recorder.trace_id,
             step_index=step,
         )
-        result = self._tools.execute(call.name, arguments, context)
+        try:
+            result = self._timeouts.run_tool(
+                call.name,
+                partial(self._tools.execute, call.name, arguments, context),
+            )
+        except TimeoutExceededError as exc:
+            # Close the tool boundary explicitly: the call was abandoned, so
+            # its recorded outcome is a failed ToolResult, never a success.
+            self._recorder.emit(
+                AgentEventType.TOOL_CALL_FINISHED,
+                {
+                    "step": step,
+                    "call_id": call.call_id,
+                    "name": call.name,
+                    "ok": False,
+                    "value": None,
+                    "error": redact_diagnostic(str(exc)),
+                    "timeout": {
+                        "kind": exc.kind,
+                        "target": exc.target,
+                        "timeout_seconds": exc.timeout_seconds,
+                    },
+                },
+            )
+            raise
         self._recorder.emit(
             AgentEventType.TOOL_CALL_FINISHED,
             {
@@ -260,6 +316,29 @@ class AgentLoop:
         self._recorder.emit(
             AgentEventType.AGENT_FAILED,
             {"phase": phase, "error": error, "steps": steps},
+        )
+        return AgentRunResult(
+            session_id=self._recorder.session_id,
+            trace_id=self._recorder.trace_id,
+            status="failed",
+            error=error,
+            steps=steps,
+        )
+
+    def _fail_timeout(self, steps: int, phase: str, exc: TimeoutExceededError) -> AgentRunResult:
+        error = redact_diagnostic(str(exc))
+        self._recorder.emit(
+            AgentEventType.AGENT_FAILED,
+            {
+                "phase": phase,
+                "error": error,
+                "steps": steps,
+                "timeout": {
+                    "kind": exc.kind,
+                    "target": exc.target,
+                    "timeout_seconds": exc.timeout_seconds,
+                },
+            },
         )
         return AgentRunResult(
             session_id=self._recorder.session_id,

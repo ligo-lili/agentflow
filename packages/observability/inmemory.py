@@ -34,16 +34,32 @@ class InMemoryEventStore:
 
 
 class InMemorySnapshotStore:
-    """Snapshot persistence for prompt and context snapshots."""
+    """Snapshot persistence for prompt and context snapshots.
+
+    Snapshots are immutable evidence: saving a snapshot id that already
+    exists raises ``StoreError`` instead of replacing the recorded snapshot.
+    """
 
     def __init__(self) -> None:
         self._prompt: list[PromptSnapshot] = []
         self._context: list[ContextSnapshot] = []
+        self._prompt_ids: set[str] = set()
+        self._context_ids: set[str] = set()
 
     def save_prompt_snapshot(self, snapshot: PromptSnapshot) -> None:
+        if snapshot.snapshot_id in self._prompt_ids:
+            raise StoreError(
+                f"duplicate snapshot_id {snapshot.snapshot_id!r} in prompt_snapshots"
+            )
+        self._prompt_ids.add(snapshot.snapshot_id)
         self._prompt.append(snapshot)
 
     def save_context_snapshot(self, snapshot: ContextSnapshot) -> None:
+        if snapshot.snapshot_id in self._context_ids:
+            raise StoreError(
+                f"duplicate snapshot_id {snapshot.snapshot_id!r} in context_snapshots"
+            )
+        self._context_ids.add(snapshot.snapshot_id)
         self._context.append(snapshot)
 
     def get_prompt_snapshots(self, session_id: str) -> list[PromptSnapshot]:

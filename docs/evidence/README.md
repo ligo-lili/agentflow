@@ -12,7 +12,11 @@ Required reports:
 - `phase-3/replay-report.md`
 - `phase-3/inspector-report.md`
 - `phase-4/report.md`
-- `final-report.md`
+- `final-report.md` (regenerated from clean-run output after the review cycle)
+- `review-r1-r4/report.md` (post-MVP review improvements, P0 items R1–R4)
+- `review-r5-r6-r8/report.md` (review improvements: token auditability, scenario suite, release verification)
+- `review-r7/report.md` (optional OpenAI-compatible provider smoke path)
+- `review-r9-r10/report.md` (Inspector polish, visual walkthrough with screenshots, portfolio narrative)
 
 Reports must show actual test/demo output; “implemented successfully” alone is not evidence. Keep secrets and API keys out of reports.
 

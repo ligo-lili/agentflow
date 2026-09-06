@@ -74,6 +74,17 @@ def test_score_weights_sum_to_one_and_composite_matches_documented_formula() -> 
     assert composite_score(0, 1.0, 1.0, 1.0, 1.0) == pytest.approx(0.65)
 
 
+def test_composite_score_rejects_invalid_weight_overrides() -> None:
+    with pytest.raises(ValueError, match="must cover exactly"):
+        composite_score(1, 1.0, 1.0, 1.0, 1.0, weights={"task_completed": 1.0})
+    with pytest.raises(ValueError, match="weights must sum to 1.0"):
+        composite_score(1, 1.0, 1.0, 1.0, 1.0, weights={**SCORE_WEIGHTS, "task_completed": 0.5})
+    # An equal-weight override is valid and changes the outcome deterministically.
+    equal = {name: 0.2 for name in SCORE_WEIGHTS}
+    assert composite_score(1, 1.0, 1.0, 1.0, 1.0, weights=equal) == 1.0
+    assert composite_score(0, 1.0, 1.0, 1.0, 1.0, weights=equal) == pytest.approx(0.8)
+
+
 # --- evaluator over replays --------------------------------------------------
 
 def make_finished_replay(session_id: str) -> SessionReplay:

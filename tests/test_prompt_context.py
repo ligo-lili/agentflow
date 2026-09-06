@@ -102,7 +102,8 @@ def test_context_manager_breakdown_sums_to_total_and_records_budget() -> None:
     assert build.snapshot.budget_limit == 4096 - 256
     assert build.snapshot.compaction_state == "none"
     assert build.snapshot.estimator == "deterministic-v1"
-    assert build.snapshot.metadata == {"step": 1}
+    assert build.snapshot.metadata["step"] == 1
+    assert build.snapshot.metadata["estimator_metadata"] == DeterministicEstimator().metadata
     assert build.snapshot.messages == messages
 
 

@@ -7,9 +7,14 @@ name = "agentflow"
 version = "0.1.0"
 description = "The Context Debugger and Observatory for AI Agents"
 requires-python = ">=3.11"
+# Tested compatible set (review R8): fastapi 0.141.1 + starlette 1.6.0 +
+# httpx 0.28.1 + pydantic 2.13.2 on Python 3.11/3.13. starlette is pinned
+# explicitly because the TestClient deprecation path depends on it; the
+# ranges below resolve to exactly the tested set.
 dependencies = [
   "pydantic>=2.7,<3",
-  "fastapi>=0.110,<1",
+  "fastapi>=0.141,<0.142",
+  "starlette>=1.6,<1.7",
   "uvicorn[standard]>=0.29,<1",
   "jinja2>=3.1,<4",
 ]
@@ -20,9 +25,12 @@ dev = [
   "pytest-cov>=5,<6",
   "ruff>=0.5,<1",
   "mypy>=1.10,<2",
-  "httpx>=0.27,<2",
+  "httpx>=0.28,<0.29",
 ]
-tokenizer = ["tiktoken>=0.7,<1"]
+tokenizer = ["tiktoken>=0.13,<0.14"]
+# Optional real-provider smoke path (review R7): httpx backs the
+# OpenAI-compatible adapter; it is never required by the offline suite.
+openai-compat = ["httpx>=0.28,<0.29"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["packages"]
@@ -30,6 +38,22 @@ packages = ["packages"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
+filterwarnings = [
+  # starlette>=1.6 routes TestClient through the `httpx2` package and warns
+  # when the legacy `httpx` client is used. `httpx2` is not installable in
+  # the offline verification sandbox, so the tested set above (starlette
+  # 1.6.0 + httpx 0.28.1) is pinned instead. Remove this ignore as soon as
+  # httpx2 can be installed in the verification environments.
+  "ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["packages"]
+
+[tool.coverage.report]
+# Core-package coverage floor (review R8). Reports fail (exit code) below it.
+fail_under = 80
+show_missing = true
 
 [tool.ruff]
 line-length = 100
@@ -46,3 +70,8 @@ packages = ["packages"]
 module = "tiktoken"
 ignore_missing_imports = true
 
+# httpx backs the optional OpenAI-compatible adapter (extra `openai-compat`);
+# the offline suite itself only needs it via the dev extra.
+[[tool.mypy.overrides]]
+module = "httpx"
+ignore_missing_imports = true

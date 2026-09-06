@@ -45,6 +45,12 @@
   details { margin: 4px 0; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; background: var(--panel2); }
   summary { cursor: pointer; font-size: 13px; }
   .notice { border: 1px dashed var(--warn); color: var(--warn); border-radius: 6px; padding: 8px 12px; }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; }
+    aside { border-right: 0; border-bottom: 1px solid var(--border); }
+    .grid2 { grid-template-columns: 1fr; }
+    header { flex-wrap: wrap; }
+  }
 </style>
 </head>
 <body>
@@ -107,6 +113,21 @@ var currentSessionId = null;
 
 function el(id) { return document.getElementById(id); }
 function tag(text, cls) { return '<span class="tag ' + (cls || "") + '">' + text + "</span>"; }
+function escapeHtml(text) {
+  return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function errorMessage(body, status) {
+  return (body && body.error && body.error.message) || (body && body.detail) || ("HTTP " + status);
+}
+function setPanel(id, cls, html) {
+  var box = el(id);
+  box.className = cls;
+  box.innerHTML = html;
+}
+function setNotice(id, message) {
+  setPanel(id, "", "<div class='notice'>" + escapeHtml(message) + "</div>");
+}
 
 function fetchJson(url) {
   return fetch(url).then(function (res) {
@@ -117,12 +138,13 @@ function fetchJson(url) {
 function refreshSessions() {
   fetchJson("/api/sessions").then(function (r) {
     var box = el("sessions");
+    if (r.status !== 200) { setPanel("sessions", "notice", "session list unavailable — " + errorMessage(r.body, r.status)); return; }
     if (!r.body.length) { box.className = "muted"; box.textContent = "no sessions yet"; return; }
     box.className = "";
     box.innerHTML = r.body.map(function (s) {
-      return '<div class="session' + (s.session_id === currentSessionId ? " active" : "") + '" data-id="' + s.session_id + '">' +
-        '<div class="meta">' + (s.task || "(no task)") + " " + tag(s.status, "status-" + s.status) + "</div>" +
-        '<div class="id">' + s.session_id.slice(0, 8) + "… · " + s.event_count + " events</div></div>";
+      return '<div class="session' + (s.session_id === currentSessionId ? " active" : "") + '" data-id="' + escapeHtml(s.session_id) + '">' +
+        '<div class="meta">' + escapeHtml(s.task || "(no task)") + " " + tag(s.status, "status-" + s.status) + "</div>" +
+        '<div class="id">' + escapeHtml(s.session_id.slice(0, 8)) + "… · " + s.event_count + " events</div></div>";
     }).join("");
     Array.prototype.forEach.call(box.querySelectorAll(".session"), function (node) {
       node.addEventListener("click", function () { selectSession(node.getAttribute("data-id")); });
@@ -135,6 +157,10 @@ function createRun(scenario) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ scenario: scenario })
   }).then(function (res) { return res.json(); }).then(function (body) {
+    if (!body.session_id) {
+      setNotice("session-detail", "run failed — " + errorMessage(body, 500));
+      return;
+    }
     currentSessionId = body.session_id;
     refreshSessions();
     selectSession(body.session_id);
@@ -144,17 +170,17 @@ function createRun(scenario) {
 function renderDetail(detail) {
   el("session-detail").className = "";
   el("session-detail").innerHTML =
-    "<div>task: " + (detail.task || "(none)") + "</div>" +
+    "<div>task: " + escapeHtml(detail.task || "(none)") + "</div>" +
     '<div>status: ' + tag(detail.status, "status-" + detail.status) +
-    " · model: <span class='mono'>" + detail.model + "</span>" +
+    " · model: <span class='mono'>" + escapeHtml(detail.model) + "</span>" +
     " · " + detail.event_count + " events" +
     (detail.created_at ? " · started " + detail.created_at.replace("T", " ").slice(0, 19) : "") + "</div>";
 }
 
 function renderTimeline(data) {
   var rows = data.entries.map(function (e) {
-    return "<tr><td class='mono'>" + e.sequence + "</td><td class='mono'>" + e.event_type +
-      "</td><td>" + (e.step === null ? "" : e.step) + "</td><td>" + (e.summary || "") + "</td></tr>";
+    return "<tr><td class='mono'>" + e.sequence + "</td><td class='mono'>" + escapeHtml(e.event_type) +
+      "</td><td>" + (e.step === null ? "" : e.step) + "</td><td>" + escapeHtml(e.summary || "") + "</td></tr>";
   }).join("");
   el("timeline").className = "";
   el("timeline").innerHTML = "<table><tr><th>seq</th><th>event</th><th>step</th><th>summary</th></tr>" + rows + "</table>";
@@ -164,13 +190,13 @@ function renderPrompt(snapshots) {
   var box = el("prompt");
   if (!snapshots.length) { box.className = "empty"; box.textContent = "no prompt snapshots"; return; }
   var latest = snapshots[snapshots.length - 1];
-  var html = "<div class='muted mono'>" + latest.snapshot_id.slice(-14) +
-    " · estimator " + latest.estimator + " · total " + latest.total_tokens + " tokens</div>";
+  var html = "<div class='muted mono'>" + escapeHtml(latest.snapshot_id.slice(-14)) +
+    " · estimator " + escapeHtml(latest.estimator) + " · total " + latest.total_tokens + " tokens</div>";
   html += latest.sections.map(function (name) {
     var tokens = latest.token_counts[name] || 0;
     var pct = latest.total_tokens ? Math.round(100 * tokens / latest.total_tokens) : 0;
     var content = (latest.section_content[name] || "").replace(/</g, "&lt;");
-    return "<details><summary>" + name + " — " + tokens + " tokens " +
+    return "<details><summary>" + escapeHtml(name) + " — " + tokens + " tokens " +
       "<span class='bar' style='width:" + Math.max(pct, 4) * 2 + "px'></span></summary>" +
       "<pre>" + content + "</pre></details>";
   }).join("");
@@ -184,11 +210,10 @@ function renderContext(snapshots) {
   var max = Math.max.apply(null, snapshots.map(function (s) { return s.total_tokens; })) || 1;
   var html = snapshots.map(function (s) {
     var parts = Object.keys(s.component_tokens).map(function (k) {
-      var pct = s.total_tokens ? Math.round(100 * s.component_tokens[k] / s.total_tokens) : 0;
-      return k + " " + s.component_tokens[k] + "t";
+      return escapeHtml(k) + " " + s.component_tokens[k] + "t";
     }).join(" · ");
     var fits = s.total_tokens <= (s.budget_limit || 0);
-    return "<div style='margin:6px 0'><div class='mono'>" + s.snapshot_id.slice(-9) +
+    return "<div style='margin:6px 0'><div class='mono'>" + escapeHtml(s.snapshot_id.slice(-9)) +
       " · step " + s.metadata.step + " · " + s.total_tokens + "/" + (s.budget_limit || "?") +
       "t " + tag(fits ? "fits" : "over", fits ? "ok" : "bad") +
       (s.compaction_state !== "none" ? " " + tag("compacted: " + s.compaction_state) : "") + "</div>" +
@@ -202,31 +227,33 @@ function renderContext(snapshots) {
 function renderReplay(replay) {
   var rows = replay.steps.map(function (s) {
     var compaction = s.compaction
-      ? "<div class='muted'>compaction " + s.compaction.strategy + ": " +
+      ? "<div class='muted'>compaction " + escapeHtml(s.compaction.strategy) + ": " +
         s.compaction.before_tokens + "→" + s.compaction.after_tokens + " tokens, removed " +
         s.compaction.removed_ids.length + "</div>" : "";
     var tools = s.tool_calls.map(function (c) {
-      return "<div class='mono'>" + c.name + " → " + tag(c.ok ? "ok" : "fail", c.ok ? "ok" : "bad") +
-        " " + String(c.value === null ? "" : c.value).slice(0, 40) + "</div>";
+      return "<div class='mono'>" + escapeHtml(c.name) + " → " + tag(c.ok ? "ok" : "fail", c.ok ? "ok" : "bad") +
+        " " + escapeHtml(String(c.value === null ? "" : c.value).slice(0, 40)) + "</div>";
     }).join("");
     return "<tr><td class='mono'>" + s.step + "</td><td>" +
       (s.context_total_tokens === null ? "" : s.context_total_tokens + "t") +
-      "</td><td>" + (s.finish_reason || "") + "</td><td>" + (s.response_content || "") +
+      "</td><td>" + (s.finish_reason || "") + "</td><td>" + escapeHtml(s.response_content || "") +
       (tools ? tools : "") + compaction + "</td></tr>";
   }).join("");
   el("replay").className = "";
   el("replay").innerHTML =
     "<div class='muted'>status " + tag(replay.status, "status-" + replay.status) +
-    " · answer: " + (replay.final_answer || "—") + "</div>" +
+    " · integrity " + tag(replay.integrity && replay.integrity.valid ? "valid" : "invalid",
+      replay.integrity && replay.integrity.valid ? "ok" : "bad") +
+    " · answer: " + escapeHtml(replay.final_answer || "—") + "</div>" +
     "<table><tr><th>step</th><th>ctx</th><th>finish</th><th>response / tools</th></tr>" + rows + "</table>";
 
   var toolRows = [];
   replay.steps.forEach(function (s) {
     s.tool_calls.forEach(function (c) {
-      toolRows.push("<tr><td class='mono'>step " + s.step + "</td><td class='mono'>" + c.name +
-        "</td><td>" + JSON.stringify(c.arguments) + "</td><td>" +
+      toolRows.push("<tr><td class='mono'>step " + s.step + "</td><td class='mono'>" + escapeHtml(c.name) +
+        "</td><td>" + escapeHtml(JSON.stringify(c.arguments)) + "</td><td>" +
         tag(c.ok ? "ok" : "fail", c.ok ? "ok" : "bad") + "</td><td class='mono'>" +
-        String(c.value === null ? "" : c.value).slice(0, 60) + (c.error || "") + "</td></tr>");
+        escapeHtml(String(c.value === null ? "" : c.value).slice(0, 60)) + escapeHtml(c.error || "") + "</td></tr>");
     });
   });
   el("tools").className = toolRows.length ? "" : "empty";
@@ -238,21 +265,33 @@ function renderReplay(replay) {
   el("compaction").className = comps.length ? "" : "empty";
   el("compaction").innerHTML = comps.length
     ? comps.map(function (c) {
-        return "<div style='margin:8px 0'><div class='mono'>" + tag(c.strategy) +
+        return "<div style='margin:8px 0'><div class='mono'>" + tag(escapeHtml(c.strategy)) +
           " " + c.before_tokens + "→" + (c.after_tokens === null ? "?" : c.after_tokens) +
           " tokens " + tag(c.fits_budget ? "fits" : "over", c.fits_budget ? "ok" : "bad") + "</div>" +
-          "<div class='muted'>trigger: " + c.trigger + "</div>" +
+          "<div class='muted'>trigger: " + escapeHtml(c.trigger) + "</div>" +
           "<div class='muted'>removed " + c.removed_ids.length + " messages</div>" +
           "<pre>" + JSON.stringify(c.preserved_state, null, 2).replace(/</g, "&lt;") + "</pre></div>";
       }).join("")
     : "no compaction in this session";
 }
 
+function renderReplayError(r) {
+  var codes = "";
+  try {
+    codes = (r.body.error.details.integrity.errors || [])
+      .map(function (i) { return i.code; }).join(", ");
+  } catch (e) { /* envelope without integrity details */ }
+  setNotice("replay", "trace invalid" + (codes ? " (" + codes + ")" : "") + " — " + errorMessage(r.body, r.status));
+  setPanel("tools", "empty", "no tool calls");
+  setPanel("compaction", "empty", "no compaction in this session");
+}
+
 function renderEvaluation(r) {
   var box = el("evaluation");
   if (r.status !== 200) {
     box.className = "";
-    box.innerHTML = "<div class='notice'>evaluation unavailable — " + (r.body.detail || r.status) + "</div>";
+    box.innerHTML = "<div class='notice'>evaluation unavailable — " +
+      escapeHtml(errorMessage(r.body, r.status)) + "</div>";
     return;
   }
   var report = r.body;
@@ -279,20 +318,57 @@ function renderEvaluation(r) {
     "<table><tr><th>metric</th><th>value</th></tr>" + rows + "</table>";
 }
 
-function selectSession(sessionId) {
+var LOADING_PANELS = ["session-detail", "timeline", "prompt", "context", "replay", "evaluation"];
+
+function selectSession(sessionId, fromHash) {
   currentSessionId = sessionId;
+  if (!fromHash) {
+    try {
+      history.replaceState(null, "", "#session=" + encodeURIComponent(sessionId));
+    } catch (e) {
+      location.hash = "session=" + encodeURIComponent(sessionId);
+    }
+  }
   refreshSessions();
-  fetchJson("/api/sessions/" + sessionId).then(function (r) { if (r.ok) renderDetail(r.body); });
-  fetchJson("/api/sessions/" + sessionId + "/events").then(function (r) { if (r.ok) renderTimeline(r.body); });
-  fetchJson("/api/sessions/" + sessionId + "/prompt-snapshots").then(renderPrompt);
-  fetchJson("/api/sessions/" + sessionId + "/context-snapshots").then(renderContext);
-  fetchJson("/api/sessions/" + sessionId + "/replay").then(renderReplay);
+  LOADING_PANELS.forEach(function (id) { setPanel(id, "empty", "loading…"); });
+  setPanel("tools", "empty", "loading…");
+  setPanel("compaction", "empty", "loading…");
+
+  fetchJson("/api/sessions/" + sessionId).then(function (r) {
+    if (r.ok) renderDetail(r.body); else setNotice("session-detail", "session unavailable — " + errorMessage(r.body, r.status));
+  });
+  fetchJson("/api/sessions/" + sessionId + "/events").then(function (r) {
+    if (r.ok) renderTimeline(r.body); else setNotice("timeline", "timeline unavailable — " + errorMessage(r.body, r.status));
+  });
+  fetchJson("/api/sessions/" + sessionId + "/prompt-snapshots").then(function (r) {
+    if (r.ok) renderPrompt(r.body); else setNotice("prompt", "prompt snapshots unavailable — " + errorMessage(r.body, r.status));
+  });
+  fetchJson("/api/sessions/" + sessionId + "/context-snapshots").then(function (r) {
+    if (r.ok) renderContext(r.body); else setNotice("context", "context snapshots unavailable — " + errorMessage(r.body, r.status));
+  });
+  fetchJson("/api/sessions/" + sessionId + "/replay").then(function (r) {
+    if (r.status === 409) renderReplayError(r);
+    else if (r.ok) renderReplay(r.body);
+    else setNotice("replay", "replay unavailable — " + errorMessage(r.body, r.status));
+  });
   fetchJson("/api/sessions/" + sessionId + "/evaluation").then(renderEvaluation);
 }
+
+function sessionFromHash() {
+  var match = (location.hash || "").match(/^#session=(.+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+window.addEventListener("hashchange", function () {
+  var id = sessionFromHash();
+  if (id && id !== currentSessionId) selectSession(id, true);
+});
 
 el("run-simple").addEventListener("click", function () { createRun("simple"); });
 el("run-compaction").addEventListener("click", function () { createRun("compaction"); });
 refreshSessions();
+var initialSession = sessionFromHash();
+if (initialSession) selectSession(initialSession, true);
 </script>
 </body>
 </html>

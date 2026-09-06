@@ -8,7 +8,7 @@ of silent defaults.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 #: Weights of the documented composite score; they must always sum to 1.0.
 SCORE_WEIGHTS: dict[str, float] = {
@@ -84,19 +84,30 @@ def composite_score(
     context_eff: float,
     step_eff: float,
     compaction_eff: float,
+    weights: Mapping[str, float] | None = None,
 ) -> float:
     """The documented weighted score:
 
     0.35 * task_completed + 0.20 * tool_success_rate
     + 0.20 * context_efficiency + 0.15 * step_efficiency
     + 0.10 * compaction_efficiency
+
+    ``weights`` overrides the documented set (used for the review-R6
+    sensitivity comparison). An override must contain exactly the five
+    metric keys and sum to 1.0.
     """
-    assert abs(sum(SCORE_WEIGHTS.values()) - 1.0) < 1e-9, "weights must sum to 1.0"
+    active = SCORE_WEIGHTS if weights is None else dict(weights)
+    if set(active) != set(SCORE_WEIGHTS):
+        raise ValueError(
+            f"weights must cover exactly {sorted(SCORE_WEIGHTS)}, got {sorted(active)}"
+        )
+    if abs(sum(active.values()) - 1.0) > 1e-9:
+        raise ValueError(f"weights must sum to 1.0, got {sum(active.values())}")
     weighted = (
-        SCORE_WEIGHTS["task_completed"] * task_completed
-        + SCORE_WEIGHTS["tool_success_rate"] * tool_success
-        + SCORE_WEIGHTS["context_efficiency"] * context_eff
-        + SCORE_WEIGHTS["step_efficiency"] * step_eff
-        + SCORE_WEIGHTS["compaction_efficiency"] * compaction_eff
+        active["task_completed"] * task_completed
+        + active["tool_success_rate"] * tool_success
+        + active["context_efficiency"] * context_eff
+        + active["step_efficiency"] * step_eff
+        + active["compaction_efficiency"] * compaction_eff
     )
     return clamp01(weighted)

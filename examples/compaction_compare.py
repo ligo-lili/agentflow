@@ -18,7 +18,7 @@ from packages.context.compaction import CompactionConfig, CompactionEngine
 from packages.context.estimator import DeterministicEstimator
 from packages.context.fixture import canonical_messages
 from packages.core.provider import ModelMessage
-from packages.experiments import compare_strategies
+from packages.experiments import SCENARIO_SUITE_VERSION, compare_strategies, run_suite
 
 BUDGET = BudgetConfig(max_context_tokens=250, reserved_output_tokens=50)  # limit 200
 
@@ -86,10 +86,32 @@ def main() -> None:
                f"{r.score:.4f}")
         print("  " + "  ".join(f"{col!s:>10}" for col in row))
     print(f"\nwinner: {comparison.winner} (score delta {comparison.score_delta:+.4f})")
+    print(f"estimator: {comparison.estimator} — counts are an engineering proxy, "
+          "not billing tokens; comparisons reject estimator mismatch")
     print("metrics: task_completed 0/1 · tool_success_rate successful/total (no tools → 1.0)"
           " · execution_steps = LLM + tool calls · peak/final context tokens"
           " · context_efficiency = 1 - peak/limit · compaction_efficiency = mean recovery"
           " (no compaction → 1.0)")
+
+    print(f"\n=== scenario suite v{SCENARIO_SUITE_VERSION}: three versioned fixtures ===")
+    suite = run_suite()
+    for result in suite.scenarios:
+        r = result.report
+        checks = " ".join(f"{c.code}={'ok' if c.passed else 'FAIL'}" for c in result.checks)
+        print(f"  {result.scenario} / {result.strategy}: task={r.task_completed} "
+              f"tool_rate={r.tool_success_rate:.2f} peak={r.peak_context_tokens} "
+              f"score={r.score:.4f} [{checks}]")
+    for aggregate in suite.aggregates:
+        print(f"  aggregate {aggregate.strategy}: raw(task={aggregate.mean_task_completed:.2f} "
+              f"tool={aggregate.mean_tool_success_rate:.3f} ctx={aggregate.mean_context_efficiency:.3f} "
+              f"step={aggregate.mean_step_efficiency:.3f} comp={aggregate.mean_compaction_efficiency:.3f}) "
+              f"→ composite {aggregate.composite:.4f}")
+    for failure in suite.failures:
+        print(f"  FAILURE: {failure.scenario}/{failure.strategy}: {failure.code} "
+              f"({failure.description})")
+    for entry in suite.sensitivity:
+        print(f"  weights[{entry.weights_name}]: winner={entry.winner} "
+              f"delta={entry.score_delta:+.4f} {entry.composites}")
 
 
 if __name__ == "__main__":

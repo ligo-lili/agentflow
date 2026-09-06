@@ -16,7 +16,11 @@ from pydantic import BaseModel, ConfigDict
 
 from packages.context.budget import BudgetConfig, TokenBudgetManager
 from packages.context.compaction import CompactionConfig, CompactionEngine
-from packages.context.estimator import DeterministicEstimator
+from packages.context.estimator import (
+    DeterministicEstimator,
+    EstimatorMismatchError,
+    TokenEstimator,
+)
 from packages.context.manager import ContextManager
 from packages.context.prompt import PromptBuilder
 from packages.core.provider import ModelMessage, ModelResponse, ToolCallRequest
@@ -24,7 +28,7 @@ from packages.core.tools import ToolContext, ToolResult
 from packages.evals.evaluator import EvaluationConfig, EvaluationReport, Evaluator
 from packages.observability.eventbus import EventBus
 from packages.observability.inmemory import InMemoryEventStore, InMemorySnapshotStore
-from packages.observability.replay import SessionReplayer
+from packages.observability.replay import SessionReplay, SessionReplayer
 from packages.runtime.loop import AgentLoopConfig
 from packages.runtime.provider import FakeModelProvider
 from packages.runtime.session import AgentSession
@@ -67,11 +71,17 @@ def build_benchmark_session(
     session_id: str,
     event_store: InMemoryEventStore,
     snapshot_store: InMemorySnapshotStore,
+    estimator: TokenEstimator | None = None,
 ) -> AgentSession:
-    """One canonical benchmark session; ``strategy`` is the only variable."""
+    """One canonical benchmark session; ``strategy`` is the only variable.
+
+    ``estimator`` is injectable so experiments can run under a different
+    (still deterministic) counting rule; the estimator identity is recorded
+    on every snapshot either way and travels into the comparison report.
+    """
     bus = EventBus()
     event_store = _subscribe(event_store, bus)
-    estimator = DeterministicEstimator()
+    estimator = estimator or DeterministicEstimator()
     budget = TokenBudgetManager(CANONICAL_BUDGET)
     return AgentSession(
         task="Digest the long report.",
@@ -99,18 +109,36 @@ def _subscribe(event_store: InMemoryEventStore, bus: EventBus) -> InMemoryEventS
     return event_store
 
 
-def run_benchmark(strategy: str, session_id: str | None = None) -> EvaluationReport:
+def run_benchmark(
+    strategy: str,
+    session_id: str | None = None,
+    estimator: TokenEstimator | None = None,
+) -> EvaluationReport:
     """Run one strategy on the canonical fixture and evaluate the replay."""
     session_id = session_id or f"bench-{strategy}"
     event_store = InMemoryEventStore()
     snapshot_store = InMemorySnapshotStore()
-    session = build_benchmark_session(strategy, session_id, event_store, snapshot_store)
+    session = build_benchmark_session(
+        strategy, session_id, event_store, snapshot_store, estimator=estimator
+    )
     session.run()
     replay = SessionReplayer(event_store, snapshot_store).load(session_id)
     evaluator = Evaluator(
         EvaluationConfig(baseline_steps=CANONICAL_BASELINE_STEPS)
     )
     return evaluator.evaluate(replay)
+
+
+def estimator_name_of(replay: SessionReplay) -> str | None:
+    """The estimator identity recorded on the replayed session, if any.
+
+    Reads the first available context snapshot (or the prompt snapshot);
+    ``None`` means the session recorded no snapshots at all.
+    """
+    for step in replay.steps:
+        if step.context_snapshot is not None:
+            return step.context_snapshot.estimator
+    return replay.prompt_snapshot.estimator if replay.prompt_snapshot is not None else None
 
 
 class StrategyComparison(BaseModel):
@@ -120,30 +148,60 @@ class StrategyComparison(BaseModel):
 
     strategy: str
     report: EvaluationReport
+    estimator: str | None = None
 
 
 class ComparisonReport(BaseModel):
-    """A/B result over the same fixture; winner is the higher score."""
+    """A/B result over the same fixture; winner is the higher score.
+
+    ``estimator`` discloses the counting rule shared by every entry: reports
+    measured with different estimators are never presented as comparable.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     entries: tuple[StrategyComparison, ...]
     winner: str
     score_delta: float
+    estimator: str | None = None
 
 
-def compare_strategies(
-    strategies: tuple[str, ...] = CANONICAL_STRATEGIES,
-) -> ComparisonReport:
-    """Evaluate every strategy on the identical fixture and rank by score."""
-    entries = tuple(
-        StrategyComparison(strategy=strategy, report=run_benchmark(strategy))
-        for strategy in strategies
-    )
+def compare_strategy_reports(entries: tuple[StrategyComparison, ...]) -> ComparisonReport:
+    """Rank pre-built strategy reports, rejecting estimator mismatches.
+
+    All entries must disclose the same estimator identity; a comparison
+    across different estimators raises :class:`EstimatorMismatchError`
+    instead of producing a score delta that would be meaningless.
+    """
+    identities = {entry.estimator for entry in entries}
+    if len(identities) > 1:
+        raise EstimatorMismatchError(
+            "cannot compare strategies measured with different estimators: "
+            + ", ".join(sorted(str(i) for i in identities))
+            + " (counts are an engineering proxy, not billing tokens)"
+        )
+    estimator = identities.pop() if identities else None
     ranked = sorted(entries, key=lambda e: e.report.score, reverse=True)
     best, runner_up = ranked[0], ranked[-1]
     return ComparisonReport(
         entries=entries,
         winner=best.strategy,
         score_delta=round(best.report.score - runner_up.report.score, 6),
+        estimator=estimator,
     )
+
+
+def compare_strategies(
+    strategies: tuple[str, ...] = CANONICAL_STRATEGIES,
+    estimator: TokenEstimator | None = None,
+) -> ComparisonReport:
+    """Evaluate every strategy on the identical fixture and rank by score."""
+    entries = tuple(
+        StrategyComparison(
+            strategy=strategy,
+            report=run_benchmark(strategy, estimator=estimator),
+            estimator=(estimator or DeterministicEstimator()).name,
+        )
+        for strategy in strategies
+    )
+    return compare_strategy_reports(entries)
