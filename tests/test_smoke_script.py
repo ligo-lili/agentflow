@@ -149,3 +149,58 @@ def test_unknown_argument_returns_2(script: Any, capsys: Any) -> None:
     out = capsys.readouterr().out
     assert rc == 2
     assert "--fault-checks" in out
+
+
+def test_env_file_overrides_ambient_values(script: Any, capsys: Any, tmp_path: Any) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# provider config\n"
+        "export AGENTFLOW_BASE_URL=https://file-endpoint.invalid/v1\n"
+        'AGENTFLOW_API_KEY = "sk-file-secret-key-111111111"\n'
+        "AGENTFLOW_MODEL='file-model'\n",
+        encoding="utf-8",
+    )
+    rc = script.main(
+        ["--env-file", str(env_file)],
+        env={**FULL_ENV, "AGENTFLOW_MODEL": "ambient-model"},
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert len(FakeProvider.instances) == 1
+    # happy-path provider is built via from_env, so it receives raw env keys
+    kwargs = FakeProvider.instances[0]
+    assert kwargs["AGENTFLOW_BASE_URL"] == "https://file-endpoint.invalid/v1"
+    assert kwargs["AGENTFLOW_API_KEY"] == "sk-file-secret-key-111111111"
+    assert kwargs["AGENTFLOW_MODEL"] == "file-model"  # file wins over ambient env
+    assert SECRET not in out
+
+
+def test_env_file_missing_returns_2(script: Any, capsys: Any) -> None:
+    rc = script.main(["--env-file", "does-not-exist.env"], env=FULL_ENV)
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "env file not found" in out
+    assert SECRET not in out
+
+
+def test_env_file_requires_path_argument(script: Any, capsys: Any) -> None:
+    rc = script.main(["--env-file"], env=FULL_ENV)
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "--env-file requires a path" in out
+
+
+def test_parse_env_file_skips_malformed_lines(script: Any, capsys: Any, tmp_path: Any) -> None:
+    env_file = tmp_path / "partial.env"
+    env_file.write_text(
+        "A=1\n"
+        "\n"
+        "# comment\n"
+        "no-equals-sign\n"
+        "=novalue\n",
+        encoding="utf-8",
+    )
+    values = script._parse_env_file(str(env_file))
+    out = capsys.readouterr().out
+    assert values == {"A": "1"}
+    assert out.count("skipping malformed line") == 2

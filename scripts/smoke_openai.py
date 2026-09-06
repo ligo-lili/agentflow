@@ -13,7 +13,10 @@ see .env.example):
 Usage:
     python scripts/smoke_openai.py                 # happy path: one real call
     python scripts/smoke_openai.py --fault-checks  # + timeout / 401 / bad-base-url
+    python scripts/smoke_openai.py --env-file .env # read config from a dotenv file
 
+``--env-file`` must be named explicitly (no implicit .env auto-loading, keeping
+the adapter's explicit-configuration rule); file values override ambient env.
 Exit codes: 0 smoke passed · 1 smoke failed · 2 not configured / unusable.
 Credentials never appear in output: the adapter stores the key privately and
 provider failures report status codes or redacted diagnostics only.
@@ -24,6 +27,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from packages.core.provider import ModelMessage, ModelRequest
 from packages.runtime.openai_provider import (
@@ -53,7 +57,32 @@ never committed):
     set AGENTFLOW_API_KEY=<your-key>
     set AGENTFLOW_MODEL=<your-model>
 
+Or write those three variables into a gitignored .env and run with:
+
+    python scripts/smoke_openai.py --env-file .env
+
 See .env.example and docs/evidence/review-r7/report.md section 4."""
+
+
+def _parse_env_file(path: str) -> dict[str, str]:
+    """Parse a dotenv-style file: KEY=VALUE lines, ``#`` comments, optional
+    ``export `` prefix, surrounding quotes stripped. Malformed lines are
+    skipped with a note instead of aborting the smoke."""
+    values: dict[str, str] = {}
+    for lineno, raw in enumerate(
+        Path(path).read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, sep, value = line.partition("=")
+        if not sep or not key.strip():
+            print(f"env-file {path}:{lineno}: skipping malformed line")
+            continue
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
 
 
 def _build_provider(env: Mapping[str, str], **overrides: object) -> OpenAICompatProvider:
@@ -133,11 +162,31 @@ def main(
     """Run the smoke; ``env`` defaults to os.environ (injectable for tests)."""
     environ = os.environ if env is None else env
     arguments = list(argv or [])
-    with_fault_checks = "--fault-checks" in arguments
-    unknown = [a for a in arguments if a != "--fault-checks"]
+    env_file: str | None = None
+    with_fault_checks = False
+    unknown: list[str] = []
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--fault-checks":
+            with_fault_checks = True
+        elif argument == "--env-file":
+            if index + 1 >= len(arguments):
+                print("--env-file requires a path argument")
+                return 2
+            index += 1
+            env_file = arguments[index]
+        else:
+            unknown.append(argument)
+        index += 1
     if unknown:
-        print(f"unknown arguments: {unknown}; supported: --fault-checks")
+        print(f"unknown arguments: {unknown}; supported: --fault-checks, --env-file")
         return 2
+    if env_file is not None:
+        if not Path(env_file).is_file():
+            print(f"env file not found: {env_file}")
+            return 2
+        environ = {**environ, **_parse_env_file(env_file)}
 
     try:
         provider = OpenAICompatProvider.from_env(environ)
