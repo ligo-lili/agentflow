@@ -154,6 +154,10 @@ class AgentLoop:
                 ModelMessage(
                     role="assistant",
                     content=response.message.content,
+                    # Store what the model actually requested so continuation
+                    # requests stay faithful (wire format needs the calls on
+                    # the assistant message).
+                    tool_calls=tool_calls,
                 )
             )
 

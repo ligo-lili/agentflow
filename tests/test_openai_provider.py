@@ -21,6 +21,7 @@ from packages.core.provider import (
     ModelRequest,
     ModelResponse,
     TokenUsage,
+    ToolCallRequest,
     ToolSpec,
 )
 from packages.runtime.openai_provider import (
@@ -312,3 +313,69 @@ def test_unavailable_error_when_httpx_is_missing(monkeypatch: pytest.MonkeyPatch
     provider = make_provider(lambda request: httpx.Response(200, json={"choices": []}))
     with pytest.raises(OpenAIProviderUnavailableError, match="httpx is not installed"):
         provider.invoke(simple_request())
+
+
+def test_stored_tool_calls_are_replayed_faithfully_not_synthesized() -> None:
+    """Phase 6: stored tool_calls reach the wire with their real arguments."""
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.read())
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": "done"},
+                    }
+                ],
+                "usage": {"prompt_tokens": 30, "completion_tokens": 2},
+            },
+        )
+
+    provider = make_provider(handler)
+    request = ModelRequest(
+        model="test-model",
+        messages=(
+            ModelMessage(role="user", content="Count the words"),
+            ModelMessage(
+                role="assistant",
+                content="",
+                tool_calls=(
+                    ToolCallRequest(
+                        call_id="call-7",
+                        name="word_count",
+                        arguments={"text": "AgentFlow runs real tasks"},
+                    ),
+                ),
+            ),
+            ModelMessage(
+                role="tool",
+                tool_call_id="call-7",
+                name="word_count",
+                content=json.dumps({"ok": True, "value": 4, "error": None}),
+            ),
+        ),
+    )
+    response = provider.invoke(request)
+
+    assistant = captured["payload"]["messages"][1]
+    assert assistant["role"] == "assistant"
+    assert assistant["tool_calls"] == [
+        {
+            "id": "call-7",
+            "type": "function",
+            "function": {
+                "name": "word_count",
+                "arguments": json.dumps({"text": "AgentFlow runs real tasks"}),
+            },
+        }
+    ]
+    tool_message = captured["payload"]["messages"][2]
+    assert tool_message == {
+        "role": "tool",
+        "tool_call_id": "call-7",
+        "content": json.dumps({"ok": True, "value": 4, "error": None}),
+    }
+    assert response.finish_reason == "stop"

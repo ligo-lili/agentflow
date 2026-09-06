@@ -12,8 +12,25 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ToolCallRequest(BaseModel):
+    """A tool invocation requested by the model."""
+
+    model_config = ConfigDict(frozen=True)
+
+    call_id: str
+    name: str
+    arguments: Mapping[str, Any] = Field(default_factory=dict)
+
+
 class ModelMessage(BaseModel):
-    """One message in the conversation as seen by the model."""
+    """One message in the conversation as seen by the model.
+
+    Assistant messages may carry the ``tool_calls`` the model actually
+    issued; the runtime stores them so continuation requests are faithful
+    (the OpenAI-compatible wire format needs them on the assistant message).
+    Legacy transcripts without the field serialize with synthesized empty
+    arguments, exactly as before Phase 6.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -21,6 +38,7 @@ class ModelMessage(BaseModel):
     content: str
     name: str | None = None
     tool_call_id: str | None = None
+    tool_calls: tuple[ToolCallRequest, ...] = ()
 
 
 class ToolSpec(BaseModel):
@@ -43,16 +61,6 @@ class ModelRequest(BaseModel):
     tools: tuple[ToolSpec, ...] = ()
     temperature: float = 0.0
     max_output_tokens: int | None = None
-
-
-class ToolCallRequest(BaseModel):
-    """A tool invocation requested by the model."""
-
-    model_config = ConfigDict(frozen=True)
-
-    call_id: str
-    name: str
-    arguments: Mapping[str, Any] = Field(default_factory=dict)
 
 
 class TokenUsage(BaseModel):

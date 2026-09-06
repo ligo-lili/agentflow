@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,6 +14,9 @@ from apps.api.main import create_app
 from apps.api.schemas import MAX_TASK_LENGTH
 from packages.core.errors import StoreError
 from packages.core.events import AgentEvent, AgentEventType
+from packages.core.provider import ModelMessage, ModelResponse, ToolCallRequest
+from packages.core.tools import ToolContext, ToolResult
+from packages.runtime.provider import FakeModelProvider
 
 
 @pytest.fixture()
@@ -25,6 +30,43 @@ def client(tmp_path: Path):
 def api(client):  # type: ignore[no-untyped-def]
     test_client, _app = client
     return test_client
+
+
+class ShoutTool:
+    """Task-mode test tool declaring a real parameters schema."""
+
+    name = "shout"
+    description = "Uppercase the provided text."
+    parameters_schema: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {"text": {"type": "string"}},
+        "required": ["text"],
+    }
+
+    def run(self, arguments: Mapping[str, Any], context: ToolContext) -> ToolResult:
+        return ToolResult(name=self.name, ok=True, value=str(arguments.get("text", "")).upper())
+
+
+@pytest.fixture()
+def task_client(tmp_path: Path):
+    """App with an injected scripted provider and one registry tool."""
+    provider = FakeModelProvider(
+        [
+            ModelResponse(
+                message=ModelMessage(role="assistant", content=""),
+                finish_reason="tool_calls",
+                tool_calls=(
+                    ToolCallRequest(call_id="t1", name="shout", arguments={"text": "hi"}),),
+            ),
+            ModelResponse(
+                message=ModelMessage(role="assistant", content="SHOUTED: HI"),
+                finish_reason="stop",
+            ),
+        ]
+    )
+    app = create_app(tmp_path / "agentflow.db", provider=provider, tools=[ShoutTool()])
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def run_simple(api: TestClient) -> dict:
@@ -215,10 +257,50 @@ def test_oversized_task_rejected_with_422(api: TestClient) -> None:
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
-def test_task_at_the_limit_is_accepted(api: TestClient) -> None:
-    response = api.post("/api/runs", json={"scenario": "simple", "task": "y" * MAX_TASK_LENGTH})
+def test_task_at_the_limit_is_accepted(task_client: TestClient) -> None:
+    response = task_client.post("/api/runs", json={"task": "y" * MAX_TASK_LENGTH})
     assert response.status_code == 200
     assert response.json()["status"] == "finished"
+
+
+def test_task_mode_runs_custom_task_with_registry_tool(task_client: TestClient) -> None:
+    response = task_client.post("/api/runs", json={"task": "Shout hi", "tools": ["shout"]})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "finished"
+    assert body["scenario"] == "task"
+    assert body["steps"] == 2
+    assert "SHOUTED" in str(body["answer"])
+    detail = task_client.get(f"/api/sessions/{body['session_id']}").json()
+    assert detail["status"] == "finished"
+
+
+def test_task_mode_without_provider_returns_409(api: TestClient) -> None:
+    response = api.post("/api/runs", json={"task": "Anything at all"})
+    assert response.status_code == 409
+    body = response.json()
+    assert body["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
+    assert "AGENTFLOW_PROVIDER" in body["error"]["message"]
+
+
+def test_task_mode_unknown_tool_rejected_with_422(task_client: TestClient) -> None:
+    response = task_client.post("/api/runs", json={"task": "x", "tools": ["nope"]})
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert body["error"]["details"]["unknown"] == ["nope"]
+    assert "shout" in body["error"]["details"]["available"]
+
+
+def test_scenario_and_task_are_mutually_exclusive(api: TestClient) -> None:
+    both = api.post("/api/runs", json={"scenario": "simple", "task": "x"})
+    assert both.status_code == 422
+    neither = api.post("/api/runs", json={})
+    assert neither.status_code == 422
+    scenario_extras = api.post(
+        "/api/runs", json={"scenario": "simple", "tools": ["shout"]}
+    )
+    assert scenario_extras.status_code == 422
 
 
 def test_openapi_declares_success_and_error_schemas(api: TestClient) -> None:

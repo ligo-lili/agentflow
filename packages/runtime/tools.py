@@ -2,11 +2,16 @@
 
 Tool exceptions are never silently swallowed: they become a failed
 ``ToolResult`` that the loop reports as a ``ToolCallFinished`` event.
+
+Tools may optionally declare ``parameters_schema`` (a JSON-schema mapping
+describing their arguments). Real providers need this to issue meaningful
+tool calls; tools without the attribute keep the empty default schema.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import Any
 
 from packages.core.errors import AgentFlowError
 from packages.core.provider import ToolSpec
@@ -15,7 +20,20 @@ from packages.runtime.diagnostics import redact_diagnostic
 
 
 class ToolRuntimeError(AgentFlowError):
-    """Raised for tool registration mistakes (duplicate names)."""
+    """Raised for tool registration mistakes (duplicate names, bad schemas)."""
+
+
+def _parameters_schema_of(tool: Tool) -> dict[str, Any]:
+    """Duck-typed optional ``parameters_schema``; validated, never trusted."""
+    schema: Any = getattr(tool, "parameters_schema", None)
+    if schema is None:
+        return {}
+    if not isinstance(schema, Mapping):
+        raise ToolRuntimeError(
+            f"tool {tool.name!r} parameters_schema must be a mapping, "
+            f"got {type(schema).__name__}"
+        )
+    return dict(schema)
 
 
 class ToolRuntime:
@@ -36,7 +54,11 @@ class ToolRuntime:
 
     def specs(self) -> tuple[ToolSpec, ...]:
         return tuple(
-            ToolSpec(name=tool.name, description=tool.description)
+            ToolSpec(
+                name=tool.name,
+                description=tool.description,
+                parameters_schema=_parameters_schema_of(tool),
+            )
             for tool in self._tools.values()
         )
 

@@ -1,11 +1,16 @@
-"""FastAPI app: query the event log and snapshots, launch offline runs.
+"""FastAPI app: query the event log and snapshots, launch runs.
 
 The API is a read/query surface over the stores (architecture overview):
 routes depend on Store Protocols and typed DTOs (``apps.api.schemas`` and the
-package query models), never on SQLite details or the Agent Loop. The only
-write endpoint is ``POST /api/runs``, which runs synchronously inside the
-request and is offline-only in the MVP (FakeModelProvider: no network, no API
-key, no background jobs).
+package query models), never on SQLite details or the Agent Loop.
+
+``POST /api/runs`` has two modes. ``scenario`` runs are deterministic offline
+demos on the scripted ``FakeModelProvider`` (no network, no API key). ``task``
+runs execute a submitted task on the server-configured provider
+(``AGENTFLOW_PROVIDER=openai-compat``, credentials via env) with optional
+named tools from the operator-declared registry (``AGENTFLOW_TOOLS_MODULE``);
+they are guarded by configured provider/tool timeouts and run synchronously
+inside the request (background execution arrives with Phase 6.2).
 
 Every route declares a ``response_model`` and documented error statuses. All
 errors use the stable ``{"error": {"code", "message", "details"}}`` envelope
@@ -16,7 +21,8 @@ clients receive safe public messages.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+import os
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -27,6 +33,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from apps.api.config import ApiConfig
 from apps.api.schemas import (
     ErrorResponse,
     RunRequest,
@@ -40,14 +47,13 @@ from packages.context.estimator import DeterministicEstimator
 from packages.context.manager import ContextManager
 from packages.context.prompt import PromptBuilder
 from packages.core.errors import StoreError
-from packages.core.provider import ModelMessage, ModelResponse, ToolCallRequest
+from packages.core.provider import ModelMessage, ModelProvider, ModelResponse, ToolCallRequest
 from packages.core.snapshots import ContextSnapshot, PromptSnapshot
-from packages.core.tools import ToolContext, ToolResult
+from packages.core.tools import Tool, ToolContext, ToolResult
 from packages.evals.evaluator import EvaluationConfig, EvaluationReport, Evaluator
 from packages.observability.eventbus import EventBus
 from packages.observability.replay import ReplayError, SessionReplay, SessionReplayer
 from packages.observability.sqlite import (
-    DEFAULT_DB_PATH,
     SqliteEventStore,
     SqlitePersistence,
     SqliteSessionStore,
@@ -57,7 +63,9 @@ from packages.observability.timeline import SessionTimeline, SessionTimelineBuil
 from packages.runtime.diagnostics import redact_diagnostic
 from packages.runtime.loop import AgentLoopConfig
 from packages.runtime.provider import FakeModelProvider
+from packages.runtime.provider_factory import ENV_PROVIDER, create_provider
 from packages.runtime.session import AgentSession
+from packages.runtime.tool_loader import load_tools
 
 _LOGGER = logging.getLogger("agentflow.api")
 
@@ -137,28 +145,36 @@ def _compaction_script() -> list[ModelResponse]:
     ]
 
 
-def run_offline_session(db_path: Path, request: RunRequest) -> RunResponse:
-    """Run one deterministic offline session and persist it via SQLite."""
-    scenario = request.scenario
-    task = request.task or (
-        "Digest the long report." if scenario == "compaction" else "Count the words of the report."
-    )
-    provider = FakeModelProvider(
-        _compaction_script() if scenario == "compaction" else _simple_script()
-    )
-    tools: tuple[Any, ...] = (LongTool(),) if scenario == "compaction" else (WordCountTool(),)
+DEFAULT_SYSTEM_PROMPT = "You are AgentFlow."
 
+
+def _execute_session(
+    db_path: Path,
+    *,
+    task: str,
+    provider: ModelProvider,
+    tools: Sequence[Any],
+    loop_config: AgentLoopConfig,
+    budget_config: BudgetConfig,
+    with_compaction: bool,
+    scenario_label: str,
+) -> RunResponse:
+    """Run one session against its own SQLite files and persist everything.
+
+    Each run owns its bus/persistence/snapshot-store connections and closes
+    them afterwards, so concurrent runs never share SQLite connections.
+    """
     bus = EventBus()
     persistence = SqlitePersistence(bus, db_path)
     snapshot_store = SqliteSnapshotStore(db_path)
     try:
         estimator = DeterministicEstimator()
-        budget = TokenBudgetManager(BudgetConfig(max_context_tokens=500, reserved_output_tokens=50))
+        budget = TokenBudgetManager(budget_config)
         session = AgentSession(
             task=task,
             provider=provider,
             tools=tools,
-            config=AgentLoopConfig(max_steps=4, system_prompt="You are AgentFlow."),
+            config=loop_config,
             prompt_builder=PromptBuilder(estimator, snapshot_store),
             context_manager=ContextManager(
                 estimator,
@@ -167,7 +183,7 @@ def run_offline_session(db_path: Path, request: RunRequest) -> RunResponse:
                 compaction_engine=CompactionEngine(
                     estimator, budget, CompactionConfig(strategy="semantic_state")
                 )
-                if scenario == "compaction"
+                if with_compaction
                 else None,
             ),
             bus=bus,
@@ -175,7 +191,7 @@ def run_offline_session(db_path: Path, request: RunRequest) -> RunResponse:
         result = session.run()
         return RunResponse(
             session_id=session.session_id,
-            scenario=scenario,
+            scenario=scenario_label,
             status=result.status,
             answer=result.answer,
             steps=result.steps,
@@ -184,6 +200,72 @@ def run_offline_session(db_path: Path, request: RunRequest) -> RunResponse:
     finally:
         persistence.close()
         snapshot_store.close()
+
+
+def run_offline_session(db_path: Path, request: RunRequest) -> RunResponse:
+    """Run one deterministic offline scenario on the scripted fake provider."""
+    scenario = request.scenario
+    if scenario is None:
+        raise ValueError("run_offline_session requires a scenario request")
+    task = request.task or (
+        "Digest the long report." if scenario == "compaction" else "Count the words of the report."
+    )
+    provider = FakeModelProvider(
+        _compaction_script() if scenario == "compaction" else _simple_script()
+    )
+    tools: tuple[Any, ...] = (LongTool(),) if scenario == "compaction" else (WordCountTool(),)
+    return _execute_session(
+        db_path,
+        task=task,
+        provider=provider,
+        tools=tools,
+        loop_config=AgentLoopConfig(max_steps=4, system_prompt=DEFAULT_SYSTEM_PROMPT),
+        budget_config=BudgetConfig(max_context_tokens=500, reserved_output_tokens=50),
+        with_compaction=scenario == "compaction",
+        scenario_label=scenario,
+    )
+
+
+def run_task_session(state: Any, body: RunRequest) -> RunResponse:
+    """Run one custom task on the server-configured provider and registry tools."""
+    provider: ModelProvider | None = state.provider
+    if provider is None:
+        raise ApiError(
+            409,
+            "PROVIDER_NOT_CONFIGURED",
+            "no real provider is configured for task runs; set "
+            f"{ENV_PROVIDER}=openai-compat (and its credentials) at startup",
+        )
+    registry: dict[str, Tool] = state.tool_registry
+    unknown = [name for name in body.tools if name not in registry]
+    if unknown:
+        raise ApiError(
+            422,
+            "VALIDATION_ERROR",
+            "unknown tool name(s) requested",
+            {"unknown": unknown, "available": sorted(registry)},
+        )
+    config: ApiConfig = state.config
+    selected = [registry[name] for name in body.tools]
+    return _execute_session(
+        config.db_path,
+        task=body.task or "",
+        provider=provider,
+        tools=selected,
+        loop_config=AgentLoopConfig(
+            model=getattr(provider, "model", "custom"),
+            max_steps=body.max_steps or 8,
+            system_prompt=body.system_prompt or DEFAULT_SYSTEM_PROMPT,
+            provider_timeout_seconds=config.provider_timeout_seconds,
+            tool_timeout_seconds=config.tool_timeout_seconds,
+        ),
+        budget_config=BudgetConfig(
+            max_context_tokens=config.max_context_tokens,
+            reserved_output_tokens=config.reserved_output_tokens,
+        ),
+        with_compaction=True,
+        scenario_label="task",
+    )
 
 
 def _error_payload(
@@ -195,15 +277,39 @@ def _error_payload(
     return {"error": body}
 
 
-def create_app(db_path: Path | None = None) -> FastAPI:
-    """Create the API app over one SQLite database (default ``.agentflow``)."""
-    path = db_path or DEFAULT_DB_PATH
+def _provider_from_env() -> ModelProvider | None:
+    """Build the task-run provider at startup; ``None`` when not configured.
+
+    A configured-but-invalid provider fails startup (explicit configuration:
+    never discover a bad provider mid-request).
+    """
+    if not (os.environ.get(ENV_PROVIDER) or "").strip():
+        return None
+    return create_provider()
+
+
+def create_app(
+    db_path: Path | None = None,
+    provider: ModelProvider | None = None,
+    tools: Sequence[Tool] | None = None,
+) -> FastAPI:
+    """Create the API app over one SQLite database (default ``.agentflow``).
+
+    ``provider``/``tools`` inject the task-run dependencies (tests and
+    embedders); by default they come from ``AGENTFLOW_PROVIDER`` and
+    ``AGENTFLOW_TOOLS_MODULE`` — a bad configuration fails at startup.
+    """
+    config = ApiConfig.from_env(db_path)
+    registry_tools = load_tools() if tools is None else tools
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.event_store = SqliteEventStore(path)
-        app.state.snapshot_store = SqliteSnapshotStore(path)
-        app.state.session_store = SqliteSessionStore(path)
+        app.state.config = config
+        app.state.provider = provider if provider is not None else _provider_from_env()
+        app.state.tool_registry = {tool.name: tool for tool in registry_tools}
+        app.state.event_store = SqliteEventStore(config.db_path)
+        app.state.snapshot_store = SqliteSnapshotStore(config.db_path)
+        app.state.session_store = SqliteSessionStore(config.db_path)
         try:
             yield
         finally:
@@ -211,7 +317,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             app.state.snapshot_store.close()
             app.state.session_store.close()
 
-    app = FastAPI(title="AgentFlow Inspector API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="AgentFlow Inspector API", version="0.2.0", lifespan=lifespan)
 
     @app.exception_handler(ApiError)
     async def handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
@@ -270,17 +376,26 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     @app.post(
         "/api/runs",
         response_model=RunResponse,
-        responses={422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-        summary="Run one deterministic offline session (synchronous)",
+        responses={
+            409: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+        summary="Run one session: offline demo scenario, or a custom task on the configured provider",
         description=(
-            "Executes one offline session synchronously inside the request using the "
-            "FakeModelProvider: no network, no API key, no background jobs (MVP scope). "
-            "The task is capped at 2000 characters."
+            "Two mutually exclusive modes. scenario: deterministic offline demo on "
+            "the scripted FakeModelProvider (no network). task: a custom task "
+            "executed by the server-configured provider (AGENTFLOW_PROVIDER="
+            "openai-compat + credentials), optionally calling named tools from the "
+            "server-declared registry (AGENTFLOW_TOOLS_MODULE). Task runs are "
+            "guarded by the configured provider/tool timeouts and context budget."
         ),
     )
     def create_run(body: RunRequest, request: Request) -> RunResponse:
         try:
-            return run_offline_session(path, body)
+            if body.scenario is not None:
+                return run_offline_session(config.db_path, body)
+            return run_task_session(request.app.state, body)
         except StoreError as exc:
             raise ApiError(
                 500,

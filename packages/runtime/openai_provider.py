@@ -17,12 +17,13 @@ Usage data is preserved; credentials and provider error bodies are redacted
 and never logged. Pair with the runtime's ``TimeoutPolicy`` for loop-level
 deadlines, or set ``timeout_seconds`` for the HTTP client itself.
 
-Wire-format note: the runtime transcript stores the assistant's tool calls
-implicitly (the following ``role="tool"`` messages carry ``tool_call_id``
-and ``name``). Serialization synthesizes ``tool_calls`` entries on the
-preceding assistant message with ``arguments="{}"`` — the original argument
-values are not part of the stored transcript (the model regenerates them on
-its next call).
+Wire-format note: since Phase 6 the runtime transcript stores the
+assistant's actual ``tool_calls`` on the assistant message, so continuation
+requests replay the model's real arguments. Legacy transcripts (recorded
+before that change) carry only ``role="tool"`` messages with
+``tool_call_id``/``name``; those are still serialized by synthesizing
+``tool_calls`` with ``arguments="{}"`` on the preceding assistant message.
+Orphaned tool messages raise an explicit error rather than being fabricated.
 """
 
 from __future__ import annotations
@@ -210,6 +211,21 @@ class OpenAICompatProvider:
         for message in messages:
             if message.role == "assistant":
                 entry: dict[str, Any] = {"role": "assistant", "content": message.content}
+                if message.tool_calls:
+                    # Faithful: the transcript stored what the model requested.
+                    entry["tool_calls"] = [
+                        {
+                            "id": call.call_id,
+                            "type": "function",
+                            "function": {
+                                "name": call.name,
+                                "arguments": json.dumps(
+                                    dict(call.arguments), ensure_ascii=False
+                                ),
+                            },
+                        }
+                        for call in message.tool_calls
+                    ]
                 wire.append(entry)
                 continue
             if message.role == "tool":
@@ -221,7 +237,11 @@ class OpenAICompatProvider:
                     raise OpenAIProviderError(
                         f"tool message for call {call['id']!r} has no preceding assistant message"
                     )
-                target.setdefault("tool_calls", []).append(call)
+                existing = target.get("tool_calls")
+                if not existing:
+                    # Legacy transcript without stored tool calls: synthesize
+                    # the assistant call (arguments are not recoverable).
+                    target["tool_calls"] = [call]
                 wire.append(
                     {
                         "role": "tool",

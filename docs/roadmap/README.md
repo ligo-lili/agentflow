@@ -13,6 +13,7 @@ T1+T2+T3+T4
 ├── T6 API/Web Inspector
 └── T7 Evaluation/Experiment
 T1-T7 → T8 Integration
+T8 → T9-T11 Production usability (phase 6)
 ```
 
 ## Task contract
@@ -32,6 +33,9 @@ Every task must provide owned files, interfaces, tests, demo command, evidence p
 | T6 | FastAPI + Web Inspector | T2,T5 | `docs/evidence/phase-3/inspector-report.md` |
 | T7 | Evaluation and A/B comparison | T1,T3,T4,T5 | `docs/evidence/phase-4/report.md` |
 | T8 | Integration, README, portfolio evidence | T1-T7 | `docs/evidence/final-report.md` |
+| T9 | Real-provider task runs (factory, tool schemas, tools module) | T8 | `docs/evidence/phase-6-1-task-runs/report.md` |
+| T10 | Background runs (202 + polling, queue, sweep) | T9 | `docs/evidence/phase-6-2-background-runs/report.md` |
+| T11 | Deployment (auth, CORS, healthz, Docker) | T10 | `docs/evidence/phase-6-3-deployment/report.md` |
 
 Detailed acceptance criteria live in the phase files below.
 
