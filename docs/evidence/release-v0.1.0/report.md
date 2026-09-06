@@ -77,17 +77,35 @@ exit code: 2
 本报告数字为本发布时点全新运行,取代 final-report 第 3 节的时点数字
 (189 passed / 95.31%);最终口径以本报告为准。
 
-### 3.1 真实端点冒烟(待凭据)
+### 3.1 真实端点冒烟(2026-09-06 已执行,关闭 R7 手动步骤)
 
 2026-09-06 本机盘点:无 `AGENTFLOW_*`/API 相关环境变量,用户级持久环境
 变量与 E:\ 一级项目目录均无 `.env`;网络连通性正常
 (api.deepseek.com HTTP 401 要求鉴权、open.bigmodel.cn HTTP 200,均为
-可达证明)。**唯一缺项是凭据**,冒烟命令已就绪:
+可达证明)。凭据由用户写入(先误写入被跟踪的 `.env.example`,bootstrap
+脚本已把值迁移到 gitignored 的 `.env` 并还原模板,值未进入会话记录),
+随后执行 `python scripts/smoke_openai.py --env-file .env --fault-checks`,
+对某个 OpenAI 兼容端点实测输出:
 
-```powershell
-# 在 E:\agentflow\.env(已被 .gitignore)写入三行后执行:
-python scripts/smoke_openai.py --env-file .env --fault-checks
+```text
+[1/1] happy path: one real /chat/completions call ...
+finish_reason=stop
+content='OK'
+usage=prompt_tokens=88 completion_tokens=17
+happy path OK
+[fault 1/3] timeout injection ...
+  OK: OpenAIProviderTimeoutError: provider request exceeded its 0.001s HTTP deadline
+[fault 2/3] invalid credential (expect HTTP 401) ...
+  OK: OpenAIProviderError: provider returned HTTP 401
+[fault 3/3] unroutable base URL ...
+  OK: OpenAIProviderError: provider request failed: ConnectError: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1032)
+fault checks OK (all failures typed, no key or body leaked)
 ```
+
+结论:真实端点上 happy path(`stop` + 逐字段 usage)与全部三类故障注入
+均符合 R7 报告第 4 节的预期行为;端点与 key 均未出现在任何输出中
+(本节只记录用量与错误类别)。取代 `review-r7/report.md` 第 4 节
+"烟测未执行"的时点说明。
 
 ## 4. Files Changed
 
@@ -96,16 +114,15 @@ python scripts/smoke_openai.py --env-file .env --fault-checks
 
 ## 5. Known Limitations
 
-- 真实端点冒烟仍未执行(本机无凭据,网络已验证可达);`--fault-checks`
-  的 401 与不可路由两类检查依赖真实网络行为(DNS 失败/拒绝响应的形态
-  因端点而异)。
+- `--fault-checks` 的"不可路由 base_url"一项在实测网络中表现为 TLS 握手
+  被截断(`SSL: UNEXPECTED_EOF_WHILE_READING`,本地网络有 DNS 代答),而非
+  DNS 解析失败;类型化错误(`OpenAIProviderError` + 脱敏诊断)仍符合契约,
+  但"非 DNS 失败形态"与 R7 报告的字面预期不同,如实记录。
 - 脚本未纳入 mypy --strict 范围(配置仅覆盖 `packages`),由 ruff 与
   9 项离线测试覆盖,与 `scripts/check_wheel.py` 同等对待。
 
 ## 6. Follow-up Needed
 
-- 有凭据时执行(任选其一),把输出追加到本报告第 3.1 节:
-  `python scripts/smoke_openai.py --env-file .env --fault-checks`
-  或先 `set AGENTFLOW_*` 再 `python scripts/smoke_openai.py --fault-checks`。
-- 推送后在 GitHub Actions 确认 Ubuntu+Windows × 3.11/3.13 矩阵与 wheel
-  作业绿灯(沙箱无 gh CLI,无法本地观测)。
+- [x] 真实端点冒烟:已完成,见第 3.1 节(2026-09-06)。
+- [ ] 推送后在 GitHub Actions 确认 Ubuntu+Windows × 3.11/3.13 矩阵与
+  wheel 作业绿灯(沙箱无 gh CLI,无法本地观测)。
