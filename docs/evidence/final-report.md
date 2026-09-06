@@ -54,6 +54,25 @@ Success: no issues found in 36 source files   # mypy --strict（packages）
 CI（`.github/workflows/ci.yml`）在 Python 3.11/3.13 矩阵上运行同一命令组；
 本机为无 git 仓库的沙箱，CI 以配置交付、以本地命令为执行证据。
 
+### CI 修复记录（2026-09-06，首次推送后）
+
+首次推送触发 CI 后，`3.11/ubuntu-latest` 作业失败并取消另一矩阵作业。在干净
+venv 中复现出**两个只在干净环境暴露的问题**（本地因恰好装有 httpx/tiktoken
+而未暴露）：
+
+1. `starlette.testclient` 强依赖 `httpx`，但 dev 依赖未声明 → pytest 收集
+   `test_api.py`/`test_integration.py` 即失败。修复：`pyproject.toml` 的
+   `[project.optional-dependencies].dev` 增加 `httpx>=0.27,<2`。
+2. mypy strict 找不到可选依赖 `tiktoken`（本地已装）→ `mypy packages` 报
+   `import-not-found`。修复：`[[tool.mypy.overrides]] module="tiktoken"
+   ignore_missing_imports=true`（tiktoken 为可选 extra，estimator 设计上
+   优雅回退）。
+
+另将 CI actions 升级至 node24 版本（checkout@v5 / setup-python@v6）并为
+pip 缓存声明 `cache-dependency-path: pyproject.toml`，消除 Node 20 弃用告警。
+修复后以干净 venv 完整模拟 CI 四步：`pip install -e ".[dev]"` → pytest
+（117 passed + 1 skipped，tiktoken 缺席时按设计跳过）→ ruff → mypy，全部通过。
+
 ## 4. Demo 输出（五个，全部离线确定）
 
 ### 4.1 `python examples/simple_agent.py`（T1 运行时）
