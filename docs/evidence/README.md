@@ -17,6 +17,7 @@ Required reports:
 - `review-r5-r6-r8/report.md` (review improvements: token auditability, scenario suite, release verification)
 - `review-r7/report.md` (optional OpenAI-compatible provider smoke path)
 - `review-r9-r10/report.md` (Inspector polish, visual walkthrough with screenshots, portfolio narrative)
+- `release-v0.1.0/report.md` (release close-out: smoke script, doc drift fixes, v0.1.0 tag)
 
 Reports must show actual test/demo output; “implemented successfully” alone is not evidence. Keep secrets and API keys out of reports.
 
