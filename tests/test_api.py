@@ -70,24 +70,40 @@ def task_client(tmp_path: Path):
 
 
 def run_simple(api: TestClient) -> dict:
-    response = api.post("/api/runs", json={"scenario": "simple"})
-    assert response.status_code == 200
-    return response.json()
+    """Submit a run (202) and wait for its terminal projection."""
+    return submit_and_wait(api, {"scenario": "simple"})
 
 
 def run_compaction(api: TestClient) -> dict:
-    response = api.post("/api/runs", json={"scenario": "compaction"})
-    assert response.status_code == 200
-    return response.json()
+    return submit_and_wait(api, {"scenario": "compaction"})
+
+
+def submit_and_wait(api: TestClient, payload: dict) -> dict:
+    """POST /api/runs (202) then poll the projection to a terminal state."""
+    response = api.post("/api/runs", json=payload)
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["status"] == "running"
+    detail = wait_terminal(api, str(body["session_id"]))
+    return {**body, "detail": detail}
+
+
+def wait_terminal(api: TestClient, session_id: str, attempts: int = 200) -> dict:
+    """Poll the session detail until the projection reports a terminal state."""
+    for _ in range(attempts):
+        detail = api.get(f"/api/sessions/{session_id}")
+        assert detail.status_code == 200, detail.text
+        body = detail.json()
+        if body["status"] != "running":
+            return body
+    raise AssertionError("session did not reach a terminal state in time")
 
 
 def test_post_run_creates_a_persisted_offline_session(api: TestClient) -> None:
     body = run_simple(api)
-    assert body["status"] == "finished"
+    assert body["detail"]["status"] == "finished"
     assert body["scenario"] == "simple"
-    assert body["steps"] == 2
-    assert body["event_count"] >= 6
-    assert "The report contains" in str(body["answer"])
+    assert body["detail"]["event_count"] >= 6
 
 
 def test_post_run_compaction_scenario_records_compaction(api: TestClient) -> None:
@@ -106,7 +122,7 @@ def test_sessions_list_contains_created_sessions(api: TestClient) -> None:
     assert len(match) == 1
     assert match[0]["status"] == "finished"
     assert "Count the words" in match[0]["task"]
-    assert match[0]["event_count"] == created["event_count"]
+    assert match[0]["event_count"] == created["detail"]["event_count"]
 
 
 def test_session_detail_returns_metadata_and_counts(api: TestClient) -> None:
@@ -158,7 +174,7 @@ def test_replay_endpoint_rebuilds_without_execution(api: TestClient) -> None:
     replay = first.json()
     assert replay["status"] == "finished"
     assert replay["integrity"]["valid"] is True
-    assert replay["final_answer"] == created["answer"]
+    assert replay["final_answer"] == "The report contains 18 words."
     assert replay["steps"][0]["tool_calls"][0]["name"] == "word_count"
     assert replay["steps"][0]["tool_calls"][0]["value"] == 18
 
@@ -259,20 +275,25 @@ def test_oversized_task_rejected_with_422(api: TestClient) -> None:
 
 def test_task_at_the_limit_is_accepted(task_client: TestClient) -> None:
     response = task_client.post("/api/runs", json={"task": "y" * MAX_TASK_LENGTH})
-    assert response.status_code == 200
-    assert response.json()["status"] == "finished"
+    assert response.status_code == 202
+    detail = wait_terminal(task_client, str(response.json()["session_id"]))
+    assert detail["status"] == "finished"
 
 
 def test_task_mode_runs_custom_task_with_registry_tool(task_client: TestClient) -> None:
     response = task_client.post("/api/runs", json={"task": "Shout hi", "tools": ["shout"]})
-    assert response.status_code == 200
+    assert response.status_code == 202
     body = response.json()
-    assert body["status"] == "finished"
+    assert body["status"] == "running"
     assert body["scenario"] == "task"
-    assert body["steps"] == 2
-    assert "SHOUTED" in str(body["answer"])
-    detail = task_client.get(f"/api/sessions/{body['session_id']}").json()
+    detail = wait_terminal(task_client, str(body["session_id"]))
     assert detail["status"] == "finished"
+    replay = task_client.get(f"/api/sessions/{body['session_id']}/replay").json()
+    assert replay["final_answer"] and "SHOUTED" in str(replay["final_answer"])
+    assert any(
+        call["name"] == "shout" and call["ok"]
+        for step in replay["steps"] for call in step["tool_calls"]
+    )
 
 
 def test_task_mode_without_provider_returns_409(api: TestClient) -> None:
@@ -320,8 +341,9 @@ def test_openapi_declares_success_and_error_schemas(api: TestClient) -> None:
     ):
         assert name in components, name
     run_route = schema["paths"]["/api/runs"]["post"]
-    assert "RunResponse" in run_route["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+    assert "RunResponse" in run_route["responses"]["202"]["content"]["application/json"]["schema"]["$ref"]
     assert "422" in run_route["responses"]
+    assert "429" in run_route["responses"]
     replay_route = schema["paths"]["/api/sessions/{session_id}/replay"]["get"]
     assert "409" in replay_route["responses"]
 

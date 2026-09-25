@@ -9,8 +9,11 @@ demos on the scripted ``FakeModelProvider`` (no network, no API key). ``task``
 runs execute a submitted task on the server-configured provider
 (``AGENTFLOW_PROVIDER=openai-compat``, credentials via env) with optional
 named tools from the operator-declared registry (``AGENTFLOW_TOOLS_MODULE``);
-they are guarded by configured provider/tool timeouts and run synchronously
-inside the request (background execution arrives with Phase 6.2).
+they are guarded by configured provider/tool timeouts. Both modes accept with
+202 and execute on a bounded background queue (``AGENTFLOW_RUN_WORKERS``,
+429 at capacity) — clients poll the session endpoints until the projection
+reports a terminal status. Sessions left ``running`` by a previous process
+receive a terminal ``AgentFailed`` during startup.
 
 Every route declares a ``response_model`` and documented error statuses. All
 errors use the stable ``{"error": {"code", "message", "details"}}`` envelope
@@ -34,6 +37,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from apps.api.config import ApiConfig
+from apps.api.runqueue import RunQueue
 from apps.api.schemas import (
     ErrorResponse,
     RunRequest,
@@ -47,8 +51,10 @@ from packages.context.estimator import DeterministicEstimator
 from packages.context.manager import ContextManager
 from packages.context.prompt import PromptBuilder
 from packages.core.errors import StoreError
+from packages.core.ids import utc_now
 from packages.core.provider import ModelMessage, ModelProvider, ModelResponse, ToolCallRequest
 from packages.core.snapshots import ContextSnapshot, PromptSnapshot
+from packages.core.stores import SessionRecord
 from packages.core.tools import Tool, ToolContext, ToolResult
 from packages.evals.evaluator import EvaluationConfig, EvaluationReport, Evaluator
 from packages.observability.eventbus import EventBus
@@ -148,7 +154,43 @@ def _compaction_script() -> list[ModelResponse]:
 DEFAULT_SYSTEM_PROMPT = "You are AgentFlow."
 
 
-def _execute_session(
+class BuiltSession:
+    """A session plus the stores it owns (the worker closes them)."""
+
+    def __init__(
+        self,
+        session: AgentSession,
+        persistence: SqlitePersistence,
+        snapshot_store: SqliteSnapshotStore,
+        label: str,
+        task: str,
+        model: str,
+    ) -> None:
+        self.session = session
+        self.persistence = persistence
+        self.snapshot_store = snapshot_store
+        self.label = label
+        self.task = task
+        self.model = model
+
+    def close(self) -> None:
+        self.persistence.close()
+        self.snapshot_store.close()
+
+    def run(self) -> None:
+        """Execute the session; store failures cannot crash other runs."""
+        try:
+            self.session.run()
+        except Exception as exc:  # noqa: BLE001 - worker boundary: log, never crash
+            _LOGGER.error(
+                "background run crashed: %s",
+                redact_diagnostic(f"{type(exc).__name__}: {exc}"),
+            )
+        finally:
+            self.close()
+
+
+def _build_session(
     db_path: Path,
     *,
     task: str,
@@ -157,13 +199,8 @@ def _execute_session(
     loop_config: AgentLoopConfig,
     budget_config: BudgetConfig,
     with_compaction: bool,
-    scenario_label: str,
-) -> RunResponse:
-    """Run one session against its own SQLite files and persist everything.
-
-    Each run owns its bus/persistence/snapshot-store connections and closes
-    them afterwards, so concurrent runs never share SQLite connections.
-    """
+) -> tuple[AgentSession, SqlitePersistence, SqliteSnapshotStore]:
+    """Construct a session with its own SQLite stores (closed by the worker)."""
     bus = EventBus()
     persistence = SqlitePersistence(bus, db_path)
     snapshot_store = SqliteSnapshotStore(db_path)
@@ -188,25 +225,18 @@ def _execute_session(
             ),
             bus=bus,
         )
-        result = session.run()
-        return RunResponse(
-            session_id=session.session_id,
-            scenario=scenario_label,
-            status=result.status,
-            answer=result.answer,
-            steps=result.steps,
-            event_count=len(session.events()),
-        )
-    finally:
+    except BaseException:
         persistence.close()
         snapshot_store.close()
+        raise
+    return session, persistence, snapshot_store
 
 
-def run_offline_session(db_path: Path, request: RunRequest) -> RunResponse:
-    """Run one deterministic offline scenario on the scripted fake provider."""
+def build_offline_session(db_path: Path, request: RunRequest) -> BuiltSession:
+    """Build one deterministic offline scenario session (fake provider)."""
     scenario = request.scenario
     if scenario is None:
-        raise ValueError("run_offline_session requires a scenario request")
+        raise ValueError("build_offline_session requires a scenario request")
     task = request.task or (
         "Digest the long report." if scenario == "compaction" else "Count the words of the report."
     )
@@ -214,7 +244,7 @@ def run_offline_session(db_path: Path, request: RunRequest) -> RunResponse:
         _compaction_script() if scenario == "compaction" else _simple_script()
     )
     tools: tuple[Any, ...] = (LongTool(),) if scenario == "compaction" else (WordCountTool(),)
-    return _execute_session(
+    session, persistence, snapshot_store = _build_session(
         db_path,
         task=task,
         provider=provider,
@@ -222,12 +252,12 @@ def run_offline_session(db_path: Path, request: RunRequest) -> RunResponse:
         loop_config=AgentLoopConfig(max_steps=4, system_prompt=DEFAULT_SYSTEM_PROMPT),
         budget_config=BudgetConfig(max_context_tokens=500, reserved_output_tokens=50),
         with_compaction=scenario == "compaction",
-        scenario_label=scenario,
     )
+    return BuiltSession(session, persistence, snapshot_store, scenario, task, "fake-model")
 
 
-def run_task_session(state: Any, body: RunRequest) -> RunResponse:
-    """Run one custom task on the server-configured provider and registry tools."""
+def build_task_session(state: Any, body: RunRequest) -> BuiltSession:
+    """Build one custom-task session on the configured provider and registry."""
     provider: ModelProvider | None = state.provider
     if provider is None:
         raise ApiError(
@@ -247,7 +277,7 @@ def run_task_session(state: Any, body: RunRequest) -> RunResponse:
         )
     config: ApiConfig = state.config
     selected = [registry[name] for name in body.tools]
-    return _execute_session(
+    session, persistence, snapshot_store = _build_session(
         config.db_path,
         task=body.task or "",
         provider=provider,
@@ -264,7 +294,10 @@ def run_task_session(state: Any, body: RunRequest) -> RunResponse:
             reserved_output_tokens=config.reserved_output_tokens,
         ),
         with_compaction=True,
-        scenario_label="task",
+    )
+    return BuiltSession(
+        session, persistence, snapshot_store, "task", body.task or "",
+        getattr(provider, "model", "custom"),
     )
 
 
@@ -304,15 +337,30 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Recovery: sessions left 'running' by a previous process get a
+        # terminal AgentFailed before anything is served (single tx per row).
+        sweeper = SqlitePersistence(EventBus(), config.db_path)
+        try:
+            marked = sweeper.fail_stale_running_sessions()
+        except StoreError as exc:
+            _LOGGER.error("startup sweep skipped: %s", redact_diagnostic(str(exc)))
+        else:
+            if marked:
+                _LOGGER.warning("startup sweep marked %d stale run(s) failed", marked)
+        finally:
+            sweeper.close()
+
         app.state.config = config
         app.state.provider = provider if provider is not None else _provider_from_env()
         app.state.tool_registry = {tool.name: tool for tool in registry_tools}
+        app.state.run_queue = RunQueue(config.run_workers)
         app.state.event_store = SqliteEventStore(config.db_path)
         app.state.snapshot_store = SqliteSnapshotStore(config.db_path)
         app.state.session_store = SqliteSessionStore(config.db_path)
         try:
             yield
         finally:
+            app.state.run_queue.close()
             app.state.event_store.close()
             app.state.snapshot_store.close()
             app.state.session_store.close()
@@ -365,6 +413,11 @@ def create_app(
         )
 
     def _require_session(request: Request, session_id: str) -> None:
+        # A 202-accepted session exists in the projection before its first
+        # event lands, so the session store decides — not the event log.
+        record = request.app.state.session_store.get_session(session_id)
+        if record is not None:
+            return
         events = request.app.state.event_store.get_session_events(session_id)
         if not events:
             raise ApiError(
@@ -375,33 +428,65 @@ def create_app(
 
     @app.post(
         "/api/runs",
+        status_code=202,
         response_model=RunResponse,
         responses={
             409: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
             500: {"model": ErrorResponse},
         },
-        summary="Run one session: offline demo scenario, or a custom task on the configured provider",
+        summary="Start one run: offline demo scenario, or a custom task on the configured provider",
         description=(
             "Two mutually exclusive modes. scenario: deterministic offline demo on "
             "the scripted FakeModelProvider (no network). task: a custom task "
             "executed by the server-configured provider (AGENTFLOW_PROVIDER="
             "openai-compat + credentials), optionally calling named tools from the "
-            "server-declared registry (AGENTFLOW_TOOLS_MODULE). Task runs are "
-            "guarded by the configured provider/tool timeouts and context budget."
+            "server-declared registry (AGENTFLOW_TOOLS_MODULE). Accepts with 202 "
+            "and executes on the background run queue — poll "
+            "GET /api/sessions/{id} until the status is finished/failed. 429 when "
+            "the queue is at capacity."
         ),
     )
     def create_run(body: RunRequest, request: Request) -> RunResponse:
         try:
             if body.scenario is not None:
-                return run_offline_session(config.db_path, body)
-            return run_task_session(request.app.state, body)
+                built = build_offline_session(config.db_path, body)
+            else:
+                built = build_task_session(request.app.state, body)
         except StoreError as exc:
             raise ApiError(
                 500,
                 "STORE_UNAVAILABLE",
                 "storage backend temporarily unavailable",
             ) from exc
+        # Pre-create the projection row so the session exists (status running)
+        # the instant 202 is returned — clients can poll immediately, and the
+        # startup sweep covers a crash between accept and worker start.
+        session_store: SqliteSessionStore = request.app.state.session_store
+        session_store.save_session(
+            SessionRecord(
+                session_id=built.session.session_id,
+                created_at=utc_now(),
+                task=built.task,
+                model=built.model,
+                status="running",
+            )
+        )
+        queue: RunQueue = request.app.state.run_queue
+        if not queue.submit(built.run):
+            built.close()
+            raise ApiError(
+                429,
+                "RUN_QUEUE_FULL",
+                "run queue is at capacity; retry shortly",
+                {"workers": queue.capacity},
+            )
+        return RunResponse(
+            session_id=built.session.session_id,
+            scenario=built.label,
+            status="running",
+        )
 
     @app.get(
         "/api/sessions",

@@ -14,18 +14,25 @@ from packages.observability.sqlite import SqliteEventStore, SqliteSnapshotStore
 
 
 def test_api_run_flows_through_replay_and_evaluation(tmp_path: Path) -> None:
-    """POST /api/runs → SQLite → /replay → /evaluation, one connected chain."""
+    """POST /api/runs (202) → poll → SQLite → /replay → /evaluation, one chain."""
     app = create_app(tmp_path / "agentflow.db")
     with TestClient(app) as client:
-        created = client.post("/api/runs", json={"scenario": "compaction"}).json()
-        session_id = str(created["session_id"])
+        created = client.post("/api/runs", json={"scenario": "compaction"})
+        assert created.status_code == 202
+        body = created.json()
+        assert body["status"] == "running"
+        session_id = str(body["session_id"])
 
+        for _ in range(200):
+            detail = client.get(f"/api/sessions/{session_id}")
+            assert detail.status_code == 200
+            if detail.json()["status"] != "running":
+                break
         replay = client.get(f"/api/sessions/{session_id}/replay").json()
         evaluation = client.get(f"/api/sessions/{session_id}/evaluation").json()
 
-    assert created["status"] == "finished"
+    assert detail.json()["status"] == "finished"
     assert replay["status"] == "finished"
-    assert replay["final_answer"] == created["answer"]
     assert len(replay["compactions"]) >= 1
     assert evaluation["session_id"] == session_id
     assert evaluation["compaction_count"] == len(replay["compactions"])

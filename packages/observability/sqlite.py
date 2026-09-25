@@ -31,6 +31,7 @@ from typing import Any
 
 from packages.core.errors import AgentFlowError, StoreError
 from packages.core.events import AgentEvent, AgentEventType
+from packages.core.ids import utc_now
 from packages.core.snapshots import ContextSnapshot, PromptSnapshot
 from packages.core.stores import SessionRecord
 from packages.observability.eventbus import EventBus
@@ -547,3 +548,68 @@ class SqlitePersistence:
             raise StoreError(f"duplicate event_id {event.event_id!r}") from exc
         except sqlite3.Error as exc:
             raise StoreError(f"failed to persist event {event.event_id!r}: {exc}") from exc
+
+    def fail_stale_running_sessions(self) -> int:
+        """Mark sessions still ``running`` from a previous process as failed.
+
+        For each running projection without a terminal event, one terminal
+        ``AgentFailed`` (``phase="startup_sweep"``) is appended in the same
+        transaction as the projection flip — the sweep never leaves the log
+        and the row in disagreeing states. A trace that died mid-call keeps
+        its truncated timeline honestly (replay still reports what it can);
+        the point is that no session stays ``running`` forever after a
+        restart. Terminal events that already exist are never duplicated.
+        """
+        marked = 0
+        try:
+            with self._db.transaction() as conn:
+                running = conn.execute(
+                    "SELECT session_id FROM sessions WHERE status = 'running'"
+                ).fetchall()
+                for (session_id,) in running:
+                    rows = conn.execute(
+                        "SELECT sequence, data FROM events WHERE session_id = ? "
+                        "ORDER BY sequence",
+                        (session_id,),
+                    ).fetchall()
+                    if not rows:
+                        continue  # projection without a log: left for rebuild
+                    last_sequence = int(rows[-1][0])
+                    last_event = AgentEvent.model_validate_json(str(rows[-1][1]))
+                    if last_event.event_type not in (
+                        AgentEventType.AGENT_FINISHED,
+                        AgentEventType.AGENT_FAILED,
+                    ):
+                        sweep_event = AgentEvent(
+                            event_id=f"{session_id}-{last_sequence + 1:04d}",
+                            session_id=session_id,
+                            trace_id=last_event.trace_id,
+                            sequence=last_sequence + 1,
+                            timestamp=utc_now(),
+                            event_type=AgentEventType.AGENT_FAILED,
+                            payload={
+                                "phase": "startup_sweep",
+                                "error": (
+                                    "server restarted before this session finished"
+                                ),
+                            },
+                        )
+                        conn.execute(
+                            "INSERT INTO events (event_id, session_id, sequence, "
+                            "event_type, data) VALUES (?, ?, ?, ?, ?)",
+                            (
+                                sweep_event.event_id,
+                                sweep_event.session_id,
+                                sweep_event.sequence,
+                                sweep_event.event_type.value,
+                                sweep_event.model_dump_json(),
+                            ),
+                        )
+                    conn.execute(
+                        "UPDATE sessions SET status = 'failed' WHERE session_id = ?",
+                        (session_id,),
+                    )
+                    marked += 1
+        except sqlite3.Error as exc:
+            raise StoreError(f"startup sweep failed: {exc}") from exc
+        return marked

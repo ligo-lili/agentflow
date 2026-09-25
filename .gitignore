@@ -11,4 +11,6 @@ build/
 *.egg-info/
 .agentflow/
 .env
+.zcode/
+.env.local
 

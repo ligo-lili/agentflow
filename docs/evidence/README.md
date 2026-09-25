@@ -20,6 +20,7 @@ Required reports:
 - `release-v0.1.0/report.md` (release close-out: smoke script, doc drift fixes, v0.1.0 tag)
 - `portfolio-polish/report.md` (portfolio presentation: LICENSE, badges, screenshots, mypy scope, estimator calibration)
 - `phase-6-1-task-runs/report.md` (real-provider task runs: provider factory, tool schemas, tools module, faithful continuation)
+- `phase-6-2-background-runs/report.md` (202 + polling, bounded run queue, startup sweep)
 
 Reports must show actual test/demo output; “implemented successfully” alone is not evidence. Keep secrets and API keys out of reports.
 

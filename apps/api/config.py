@@ -18,12 +18,14 @@ ENV_MAX_CONTEXT_TOKENS = "AGENTFLOW_MAX_CONTEXT_TOKENS"
 ENV_RESERVED_OUTPUT_TOKENS = "AGENTFLOW_RESERVED_OUTPUT_TOKENS"
 ENV_PROVIDER_TIMEOUT_SECONDS = "AGENTFLOW_PROVIDER_TIMEOUT_SECONDS"
 ENV_TOOL_TIMEOUT_SECONDS = "AGENTFLOW_TOOL_TIMEOUT_SECONDS"
+ENV_RUN_WORKERS = "AGENTFLOW_RUN_WORKERS"
 
 #: Context ceiling for task runs (the offline demos keep their own values).
 DEFAULT_MAX_CONTEXT_TOKENS = 4000
 DEFAULT_RESERVED_OUTPUT_TOKENS = 200
 DEFAULT_PROVIDER_TIMEOUT_SECONDS = 60.0
 DEFAULT_TOOL_TIMEOUT_SECONDS = 30.0
+DEFAULT_RUN_WORKERS = 2
 
 
 def _number(env: Mapping[str, str], name: str, default: float, integer: bool = False) -> float:
@@ -48,6 +50,7 @@ class ApiConfig:
     reserved_output_tokens: int
     provider_timeout_seconds: float
     tool_timeout_seconds: float
+    run_workers: int
 
     @classmethod
     def from_env(cls, db_path: Path | None = None, env: Mapping[str, str] | None = None) -> ApiConfig:
@@ -66,5 +69,8 @@ class ApiConfig:
             ),
             tool_timeout_seconds=_number(
                 environ, ENV_TOOL_TIMEOUT_SECONDS, DEFAULT_TOOL_TIMEOUT_SECONDS
+            ),
+            run_workers=int(
+                _number(environ, ENV_RUN_WORKERS, DEFAULT_RUN_WORKERS, integer=True)
             ),
         )
