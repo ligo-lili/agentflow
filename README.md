@@ -51,9 +51,9 @@ Design decisions are recorded in `docs/adr/`; per-task evidence reports (with ac
 
 ```bash
 python -m pip install -e ".[dev]"
-make test        # 198 offline tests
+make test        # offline tests — deterministic, no API key
 make lint        # ruff + mypy (strict on packages and apps)
-make coverage    # 95% measured, 80% floor enforced
+make coverage    # ~95% measured, 80% floor enforced
 make demo        # simple agent with a tool call, prints the event trace
 make web         # Inspector UI at http://127.0.0.1:8000
 ```

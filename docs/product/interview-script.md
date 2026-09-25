@@ -71,8 +71,9 @@ to versioned fixtures (Chinese text, JSON, tool schemas, empty content).
 - Events are the only integration boundary (no UI/replay/eval reaches into
   the loop); snapshots are first-class; everything is offline-deterministic
   by construction (scripted provider, fixed fixtures, byte-stable suites).
-- 198 offline tests, ruff + mypy `--strict`, 95% core coverage with an
-  enforced 80% floor, Windows + Linux CI, wheel build smoke.
+- 228 offline tests (growing per phase — exact counts live in the evidence
+  reports), ruff + mypy `--strict` on packages and apps, ~95% core coverage
+  with an enforced 80% floor, Windows + Linux CI, wheel build smoke.
 - **Limits, stated plainly**: the token estimator is an engineering proxy
   (not billing tokens); single-process SQLite; no auth; task completion is
   rule-based; the API runs offline scenarios synchronously. This is a
