@@ -23,15 +23,17 @@ clients receive safe public messages.
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -325,14 +327,16 @@ def create_app(
     db_path: Path | None = None,
     provider: ModelProvider | None = None,
     tools: Sequence[Tool] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> FastAPI:
     """Create the API app over one SQLite database (default ``.agentflow``).
 
     ``provider``/``tools`` inject the task-run dependencies (tests and
     embedders); by default they come from ``AGENTFLOW_PROVIDER`` and
-    ``AGENTFLOW_TOOLS_MODULE`` — a bad configuration fails at startup.
+    ``AGENTFLOW_TOOLS_MODULE``. ``env`` overrides the ambient environment
+    for configuration (tests); a bad configuration fails at startup.
     """
-    config = ApiConfig.from_env(db_path)
+    config = ApiConfig.from_env(db_path, env)
     registry_tools = load_tools() if tools is None else tools
 
     @asynccontextmanager
@@ -366,6 +370,42 @@ def create_app(
             app.state.session_store.close()
 
     app = FastAPI(title="AgentFlow Inspector API", version="0.2.0", lifespan=lifespan)
+
+    if config.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(config.cors_origins),
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+    if config.auth_token is not None:
+        expected_header = f"Bearer {config.auth_token}"
+
+        @app.middleware("http")
+        async def require_bearer_token(request: Request, call_next: Any) -> Any:
+            # /healthz stays unauthenticated so probes never need the secret;
+            # the browser page itself is served without auth (it prompts for
+            # the token and stores it locally).
+            if request.url.path == "/healthz":
+                return await call_next(request)
+            supplied = request.headers.get("Authorization", "")
+            if not hmac.compare_digest(supplied, expected_header):
+                return JSONResponse(
+                    status_code=401,
+                    content=_error_payload(
+                        "UNAUTHORIZED",
+                        "missing or invalid bearer token",
+                    ),
+                )
+            return await call_next(request)
+
+    @app.get(
+        "/healthz",
+        summary="Liveness probe (never authenticated)",
+    )
+    def healthz() -> dict[str, str]:
+        return {"status": "ok"}
 
     @app.exception_handler(ApiError)
     async def handle_api_error(request: Request, exc: ApiError) -> JSONResponse:

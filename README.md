@@ -70,34 +70,53 @@ python examples/compaction_compare.py    # A/B: both compaction strategies, metr
 
 ### Inspector
 
-`make web` (or `uvicorn apps.api.main:app`) serves the local Inspector. The page creates an offline run and shows Session Timeline, Prompt Sections, Context Breakdown, snapshot history, Tool Calls, Compaction before/after, Replay (from the event log — never calls a provider or tool) and the Evaluation Summary. The API also exposes the raw surfaces: `GET /api/sessions`, `/events`, `/prompt-snapshots`, `/context-snapshots`, `/replay`, `/evaluation`.
+`make web` (or `uvicorn apps.api.main:app`) serves the local Inspector. The page creates offline runs, submits custom tasks to the server-configured provider (with named tools), and shows Session Timeline, Prompt Sections, Context Breakdown, snapshot history, Tool Calls, Compaction before/after, Replay (from the event log — never calls a provider or tool) and the Evaluation Summary. The API also exposes the raw surfaces: `GET /api/sessions`, `/events`, `/prompt-snapshots`, `/context-snapshots`, `/replay`, `/evaluation`.
+
+### Deploy (single machine)
+
+Runs execute on a bounded background queue — `POST /api/runs` accepts with `202` and clients poll the session endpoints until the projection reports `finished`/`failed` (the Inspector does this automatically). Full variable table and trust boundaries live in [docs/architecture/deployment.md](docs/architecture/deployment.md).
+
+```bash
+docker compose up -d --build      # or: uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
+```
+
+Server-side configuration (all optional; see the deployment guide):
+
+- `AGENTFLOW_PROVIDER=openai-compat` + `AGENTFLOW_BASE_URL` / `AGENTFLOW_API_KEY` / `AGENTFLOW_MODEL` — enable real-model task runs;
+- `AGENTFLOW_TOOLS_MODULE` — operator-declared tools module (see `examples/agentflow_tools.py`);
+- `AGENTFLOW_AUTH_TOKEN` — require a bearer token on `/api/*` (`/healthz` stays open);
+- `AGENTFLOW_RUN_WORKERS`, `AGENTFLOW_DB_PATH`, budgets and timeouts.
 
 ## Scope
 
 The MVP is an offline-first Python runtime with SQLite persistence, a FastAPI query API and a lightweight web Inspector. It does not include a coding-agent replacement, voice/browser/desktop automation, multi-tenant SaaS, vector-first RAG, model training or complex multi-agent orchestration.
 
-## Status: MVP complete — not production-ready
+## Status: single-machine ready — bounded on purpose
 
 The four-week MVP scope is **complete and verified** (see
-[docs/evidence/final-report.md](docs/evidence/final-report.md)); that is a
-different claim from production readiness. Deliberate non-goals that would
-gate production use:
+[docs/evidence/final-report.md](docs/evidence/final-report.md)), and Phase 6
+added what real single-machine use requires: real-model task runs with
+operator-declared tools, background execution with polling, optional bearer
+auth, and a Docker deployment ([docs/evidence/phase-6-*/](docs/evidence/README.md)).
+That is a different claim from production readiness. Deliberate non-goals
+that would gate broader use:
 
+- **Single-process SQLite** behind the Store Protocols (WAL, one writer
+  process); the Postgres backend is future work.
+- **One bearer token, no multi-tenancy**: suited to an operator or a small
+  trusted team, not the public internet.
 - **Token counts are an engineering proxy** (documented deterministic
-  formula, or tiktoken when installed) — never provider billing tokens.
-- **Single process**: SQLite WAL serves the local API workload; no
-  multi-process writers, no network filesystems.
-- **No auth, no multi-tenancy**: the Inspector and API are localhost tools.
+  formula, or tiktoken when installed) — never provider billing tokens;
+  the gap against real usage is calibrated and documented.
 - **Rule-based task completion**: evaluation checks runtime completion, not
   semantic answer correctness; no LLM judge by design.
-- **`POST /api/runs` is synchronous and offline-only** (FakeModelProvider);
-  a real-provider smoke path exists behind the optional `openai-compat`
-  extra (`python scripts/smoke_openai.py`, mocked contract tests only).
+- **No streaming**: providers are single-shot `invoke`; timelines are
+  poll-based.
 
 ## Documentation map
 
 - [Product vision](docs/product/vision.md), [target user](docs/product/target-user.md), [scope](docs/product/scope.md), [interview script](docs/product/interview-script.md)
-- [Architecture overview](docs/architecture/overview.md), [runtime](docs/architecture/runtime.md), [persistence](docs/architecture/persistence.md), [context engine](docs/architecture/context-engine.md), [event model](docs/architecture/event-model.md), [API](docs/architecture/api.md), [evaluation](docs/architecture/evaluation.md)
+- [Architecture overview](docs/architecture/overview.md), [runtime](docs/architecture/runtime.md), [persistence](docs/architecture/persistence.md), [context engine](docs/architecture/context-engine.md), [event model](docs/architecture/event-model.md), [API](docs/architecture/api.md), [evaluation](docs/architecture/evaluation.md), [deployment](docs/architecture/deployment.md)
 - [Roadmap and task ownership](docs/roadmap/README.md)
 - [Architecture decisions](docs/adr/)
 - [Evidence index](docs/evidence/README.md) — per-task reports and the [final portfolio report](docs/evidence/final-report.md)

@@ -146,10 +146,29 @@ function setNotice(id, message) {
   setPanel(id, "", "<div class='notice'>" + escapeHtml(message) + "</div>");
 }
 
+function authHeaders(extra) {
+  var headers = extra || {};
+  var token = null;
+  try { token = localStorage.getItem("agentflow_token"); } catch (e) { /* storage unavailable */ }
+  if (token) headers["Authorization"] = "Bearer " + token;
+  return headers;
+}
+
 function fetchJson(url) {
-  return fetch(url).then(function (res) {
+  return fetch(url, { headers: authHeaders() }).then(function (res) {
+    if (res.status === 401) { promptForToken(); }
     return res.json().then(function (body) { return { ok: res.ok, status: res.status, body: body }; });
   });
+}
+
+function promptForToken() {
+  if (promptForToken.asked) return;
+  promptForToken.asked = true;
+  var token = window.prompt("This server requires an access token (AGENTFLOW_AUTH_TOKEN):");
+  if (token) {
+    try { localStorage.setItem("agentflow_token", token); } catch (e) { /* ignore */ }
+    location.reload();
+  }
 }
 
 function refreshSessions() {
@@ -171,9 +190,12 @@ function refreshSessions() {
 
 function createRun(scenario) {
   fetch("/api/runs", {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ scenario: scenario })
-  }).then(function (res) { return res.json(); }).then(function (body) {
+  }).then(function (res) {
+    if (res.status === 401) { promptForToken(); }
+    return res.json();
+  }).then(function (body) {
     if (!body.session_id) {
       setNotice("session-detail", "run failed — " + errorMessage(body, 500));
       return;
@@ -194,7 +216,7 @@ function createTaskRun() {
   var payload = { task: task };
   if (tools.length) payload.tools = tools;
   fetch("/api/runs", {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload)
   }).then(function (res) {
     return res.json().then(function (body) { return { status: res.status, body: body }; });

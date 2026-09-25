@@ -19,6 +19,8 @@ ENV_RESERVED_OUTPUT_TOKENS = "AGENTFLOW_RESERVED_OUTPUT_TOKENS"
 ENV_PROVIDER_TIMEOUT_SECONDS = "AGENTFLOW_PROVIDER_TIMEOUT_SECONDS"
 ENV_TOOL_TIMEOUT_SECONDS = "AGENTFLOW_TOOL_TIMEOUT_SECONDS"
 ENV_RUN_WORKERS = "AGENTFLOW_RUN_WORKERS"
+ENV_AUTH_TOKEN = "AGENTFLOW_AUTH_TOKEN"
+ENV_CORS_ORIGINS = "AGENTFLOW_CORS_ORIGINS"
 
 #: Context ceiling for task runs (the offline demos keep their own values).
 DEFAULT_MAX_CONTEXT_TOKENS = 4000
@@ -51,11 +53,18 @@ class ApiConfig:
     provider_timeout_seconds: float
     tool_timeout_seconds: float
     run_workers: int
+    auth_token: str | None
+    cors_origins: tuple[str, ...]
 
     @classmethod
     def from_env(cls, db_path: Path | None = None, env: Mapping[str, str] | None = None) -> ApiConfig:
         environ = os.environ if env is None else env
         configured_path = (environ.get(ENV_DB_PATH) or "").strip()
+        token = (environ.get(ENV_AUTH_TOKEN) or "").strip()
+        cors_raw = (environ.get(ENV_CORS_ORIGINS) or "").strip()
+        cors_origins = tuple(
+            origin.strip() for origin in cors_raw.split(",") if origin.strip()
+        )
         return cls(
             db_path=db_path or (Path(configured_path) if configured_path else DEFAULT_DB_PATH),
             max_context_tokens=int(
@@ -73,4 +82,6 @@ class ApiConfig:
             run_workers=int(
                 _number(environ, ENV_RUN_WORKERS, DEFAULT_RUN_WORKERS, integer=True)
             ),
+            auth_token=token or None,
+            cors_origins=cors_origins,
         )
